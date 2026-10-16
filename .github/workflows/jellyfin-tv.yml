@@ -1,0 +1,151 @@
+name: Jellyfin TV
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - master
+    paths:
+      - "jellyfin_tv/**"
+      - "packaging/**"
+      - ".github/workflows/jellyfin-tv.yml"
+  pull_request:
+    paths:
+      - "jellyfin_tv/**"
+      - "packaging/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jellyfin-tv-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_ID: io.github.gettuh.JellyfinTV
+  MANIFEST: packaging/flatpak/io.github.gettuh.JellyfinTV.json
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: System libraries for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: Python dependencies
+        run: pip install "PySide6>=6.8" pyflakes -r packaging/requirements.txt
+      - name: Lint
+        run: python -m pyflakes jellyfin_tv
+      - name: Unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s jellyfin_tv/tests -t . -v
+
+  flatpak:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    outputs:
+      signed: ${{ steps.gpg.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Fetch shared modules
+        run: git clone --depth=1 https://github.com/flathub/shared-modules.git packaging/flatpak/shared-modules
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' jellyfin_tv/__init__.py)+${GITHUB_SHA::7}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          sed -i "s/^__version__ = .*/__version__ = \"$VERSION\"/" jellyfin_tv/__init__.py
+          sed -i "s/@VERSION@/$VERSION/; s/@DATE@/$(date -u +%F)/" packaging/flatpak/$APP_ID.metainfo.xml
+      - name: Import signing key
+        id: gpg
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::FLATPAK_GPG_PRIVATE_KEY secret is missing; run packaging/flatpak/create-signing-key.sh"
+              exit 1
+            fi
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/ {print $5; exit}')"
+          echo "GPG_KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
+          echo "GPG_ARGS=--gpg-sign=$KEY_ID" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - name: Cache flatpak-builder state
+        uses: actions/cache@v6
+        with:
+          path: .flatpak-builder
+          key: flatpak-${{ hashFiles('packaging/flatpak/*.json') }}
+          restore-keys: flatpak-
+      - name: Build
+        run: |
+          flatpak-builder build "$MANIFEST" \
+            --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
+            --default-branch=stable --repo=repo $GPG_ARGS
+      - name: Repository metadata
+        run: |
+          flatpak build-update-repo repo --title="Jellyfin TV" --default-branch=stable $GPG_ARGS
+          packaging/flatpak/write-pages.sh repo "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/" "${GPG_KEY_ID:-}"
+      - name: Bundle
+        run: |
+          flatpak build-bundle repo "JellyfinTV-$VERSION-x86_64.flatpak" "$APP_ID" stable \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo $GPG_ARGS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flatpak-bundle
+          path: "*.flatpak"
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: repo
+
+  publish:
+    needs: flatpak
+    if: startsWith(github.ref, 'refs/tags/v') && needs.flatpak.outputs.signed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy Flatpak repository to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5
+      - uses: actions/download-artifact@v8
+        with:
+          name: flatpak-bundle
+      - name: GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: "*.flatpak"
+          generate_release_notes: true
+          body: |
+            Install or update from the Flatpak repository:
+
+            ```
+            flatpak remote-add --user --if-not-exists jellyfin-tv https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/jellyfin-tv.flatpakrepo
+            flatpak install --user jellyfin-tv io.github.gettuh.JellyfinTV
+            ```

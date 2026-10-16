@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+.flatpak-builder/
+build/
+repo/
+*.flatpak
+packaging/flatpak/shared-modules/
