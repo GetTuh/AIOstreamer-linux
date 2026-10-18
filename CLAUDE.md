@@ -8,7 +8,7 @@ Remote-first PySide6/QML client for AIOStreams on Linux TVs and HTPCs, in `aiost
 - Tests must pass before anything deploys; add tests with new logic.
 - Verify UI changes with the offscreen harness (below), not by opening windows on the user's desktop.
 - Don't hammer AIOStreams: every request goes through `AioClient` and its `JsonCache`; new endpoints get a TTL there.
-- Release on your own: after a user-facing feature or bug fix (or a few small ones) is committed with tests and pyflakes green, bump `__version__` in `aiostreamer/__init__.py` (patch for fixes, minor for features, never reuse a pushed tag), commit "Version X.Y.Z", tag `vX.Y.Z` and push master + tag; the tag's CI run publishes the Flatpak. Not for refactors, tests or docs alone. If pushing fails (no credentials), tell the user the exact commands.
+- Release on your own: after a user-facing feature or bug fix (or a few small ones) is committed with tests and pyflakes green, bump the last digit of `__version__` in `aiostreamer/__init__.py` (0.5.0 → 0.5.1 → 0.5.2, for features and fixes alike; never touch the first two numbers unless the user asks, never reuse a pushed tag), commit "Version X.Y.Z", tag `vX.Y.Z` and push master + tag; the tag's CI run publishes the Flatpak. Not for refactors, tests or docs alone. If pushing fails (no credentials), tell the user the exact commands.
 
 ## Run / test
 - Dev: `.venv/bin/python -m aiostreamer --windowed` (venv uses system PySide6 via --system-site-packages; deps in `packaging/requirements.txt`).
