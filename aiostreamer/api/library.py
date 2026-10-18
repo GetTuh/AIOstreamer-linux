@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+import unicodedata
 
 from aiostreamer.api import meta as m
 from aiostreamer.api.aio import CINEMETA_URL, AioClient, AioError, supports
@@ -20,6 +21,23 @@ def video_id(item):
 
 def cinemeta(cache):
     return AioClient(CINEMETA_URL, cache, label="Cinemeta", prefix="cinemeta:")
+
+
+def title_key(name):
+    text = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def split_year(name):
+    match = NAME_YEAR_RE.match(name or "")
+    return (match.group(1), match.group(2)) if match else (name or "", "")
+
+
+def same_title(own_name, item):
+    title, year = split_year(own_name)
+    if title_key(title) != title_key(item.get("name")):
+        return False
+    return not year or not item.get("year") or str(item["year"]).startswith(year)
 
 
 def stremio_kind(item):
@@ -161,16 +179,34 @@ class Library:
 
     def search(self, term, kind):
         types = ("movie",) if kind == "Movie" else ("series", "anime")
-        found = []
+        found, own = [], []
         for catalog in self.catalogs():
-            if not m.searchable(catalog) or (catalog["type"] not in types and m.direct_type(catalog["type"])):
+            direct = m.direct_type(catalog["type"])
+            if not m.searchable(catalog) or (direct and catalog["type"] not in types):
                 continue
             client = self.fallback if catalog["source"] == "cinemeta" else self.client
             try:
-                found.extend(client.catalog(catalog["type"], catalog["id"], {"search": term}))
+                metas = client.catalog(catalog["type"], catalog["id"], {"search": term})
             except Exception as exc:
                 log.info("search in %s failed: %s", catalog["id"], exc)
-        return self._previews(found)
+                continue
+            (found if direct else own).extend(metas)
+        items = self._previews(found)
+        want = "Movie" if kind == "Movie" else "Series"
+        seen = set()
+        for meta in own:
+            if meta.get("id") in seen or any(same_title(meta.get("name"), i) for i in items):
+                continue
+            seen.add(meta.get("id"))
+            self._previews([meta])
+            try:
+                item = self.item(meta["id"])
+            except Exception as exc:
+                log.info("library item %s: %s", meta.get("id"), exc)
+                continue
+            if item["type"] == want:
+                items.append(item)
+        return items
 
     def series(self, series_id, stremio_type="series", fresh=False):
         meta = self._meta(stremio_type or "series", series_id, fresh)
@@ -300,8 +336,7 @@ class Library:
         if target.startswith("tt"):
             meta = self._meta("series" if series_id else stremio_kind(item), target)
             return str(meta.get("country") or "")
-        match = NAME_YEAR_RE.match(item.get("seriesName") or item.get("name") or "")
-        title, year = (match.group(1), match.group(2)) if match else (item.get("seriesName") or item.get("name") or "", "")
+        title, year = split_year(item.get("seriesName") or item.get("name") or "")
         if not title:
             return ""
         kind = "series" if series_id or item.get("type") == "Series" else "movie"

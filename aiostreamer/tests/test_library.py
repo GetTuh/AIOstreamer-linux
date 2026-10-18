@@ -188,9 +188,33 @@ class FallbackTest(unittest.TestCase):
         self.lib.item("aiostreams::library.x")
         self.assertEqual((self.own.meta_calls, self.cinemeta.meta_calls), (1, 1))
 
-    def test_search_includes_library(self):
-        found = [i["id"] for i in self.lib.search("naruto", "Series")]
-        self.assertEqual(found, ["series-naruto", "library-naruto"])
+    def test_search_adds_typed_unmatched_library_items(self):
+        own = {
+            "lib-show": {"id": "lib-show", "type": "library", "name": "Naruto (2002)",
+                         "videos": [{"id": "lib-show:0", "season": 1, "episode": 1}]},
+            "lib-movie": {"id": "lib-movie", "type": "library", "name": "Hope (2026)",
+                          "videos": [{"id": "lib-movie:0", "season": 0, "episode": 0}],
+                          "behaviorHints": {"defaultVideoId": "lib-movie:0"}},
+            "lib-dup": {"id": "lib-dup", "type": "library", "name": "Naruto Shippūden (2007)"},
+        }
+        kinds = []
+
+        def catalog(kind, catalog_id, extra=None):
+            if kind == "library":
+                return [dict(own[k], videos=None) for k in own]
+            return [{"id": "tt1", "type": kind, "name": "Naruto Shippuden", "releaseInfo": "2007-2017"}]
+
+        def meta(kind, item_id, fresh=False):
+            kinds.append(kind)
+            return own[item_id]
+
+        self.own.catalog = catalog
+        self.cinemeta.catalog = catalog
+        self.own.meta = meta
+        self.assertEqual([i["id"] for i in self.lib.search("naruto", "Series")], ["tt1", "lib-show"])
+        self.assertEqual([i["id"] for i in self.lib.search("naruto", "Movie")], ["tt1", "lib-movie"])
+        self.assertEqual(set(kinds), {"library"})
+        self.assertEqual(self.lib.known("lib-show")["type"], "Series")
 
     def test_no_fallback_when_covered(self):
         lib = Library(FakeSession(), lambda cache: self.fail("fallback used"))
