@@ -317,11 +317,11 @@ class Library:
     def streams(self, item, fresh=False):
         return self.client.streams(stremio_kind(item), video_id(item), fresh)
 
-    def subtitles(self, item, stream=None):
+    def subtitles(self, item, stream=None, fresh=False):
         hints = (stream or {}).get("behaviorHints") or {}
         extra = {"filename": hints.get("filename"), "videoSize": hints.get("videoSize"), "videoHash": hints.get("videoHash")}
         try:
-            found = self.client.subtitles(stremio_kind(item), video_id(item), extra)
+            found = self.client.subtitles(stremio_kind(item), video_id(item), extra, fresh)
         except Exception as exc:
             log.info("subtitles: %s", exc)
             found = []

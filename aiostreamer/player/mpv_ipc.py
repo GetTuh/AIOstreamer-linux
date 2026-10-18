@@ -80,17 +80,20 @@ class MpvIpc:
         self._observers[observer_id] = (name, callback)
         self.command("observe_property", observer_id, name)
 
-    def command(self, *args):
+    def command(self, *args, background=False, timeout=REPLY_TIMEOUT):
         if self._sock is None or self._closed.is_set():
             raise MpvError("mpv is not running")
         request_id = next(self._ids)
         slot = {"done": threading.Event()}
         self._pending[request_id] = slot
-        line = json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
+        request = {"command": list(args), "request_id": request_id}
+        if background:
+            request["async"] = True
+        line = json.dumps(request).encode() + b"\n"
         try:
             with self._send_lock:
                 self._sock.sendall(line)
-            if not slot["done"].wait(REPLY_TIMEOUT):
+            if not slot["done"].wait(timeout):
                 raise MpvError("no reply to %s" % args[0])
         except OSError as exc:
             raise MpvError(str(exc))

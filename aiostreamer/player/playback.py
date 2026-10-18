@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
@@ -12,6 +13,8 @@ log = logging.getLogger("aiostreamer.playback")
 PROGRESS_INTERVAL_MS = 10_000
 UPNEXT_LEAD = 30
 SUBS_PER_LANGUAGE = 2
+MORE_SUBS = 40
+SUB_WORKERS = 6
 
 
 def media_title(item):
@@ -48,6 +51,18 @@ def pick_subtitles(subs, languages):
         counts[lang] = counts.get(lang, 0) + 1
         out.append(sub)
     return out
+
+
+def more_subtitles(subs, languages, known, limit=MORE_SUBS):
+    wanted = [canonical(lang) for lang in languages if canonical(lang)]
+    fresh, seen = [], set(known)
+    for sub in subs:
+        if sub["url"] in seen:
+            continue
+        seen.add(sub["url"])
+        fresh.append(sub)
+    fresh.sort(key=lambda s: wanted.index(canonical(s.get("lang"))) if canonical(s.get("lang")) in wanted else len(wanted))
+    return fresh[:limit]
 
 
 def wants_external(tracks, sub_langs, mode, audio_lang):
@@ -267,8 +282,35 @@ class PlaybackController(QObject):
             self._request_advance(state)
         elif args[0] == "aios-upnext-dismiss":
             state["upnext"] = "dismissed"
+        elif args[0] == "aios-more-subs":
+            self._more_subtitles(state)
         elif args[0] == "aios-version" and len(args) > 1:
             self._switch_version(state, args[1])
+
+    def _add_subtitle(self, state, sub):
+        if state is not self._active:
+            return
+        state.setdefault("subs", set()).add(sub["url"])
+        state["player"].add_subtitle(sub["url"], sub.get("title") or "Addon", sub["lang"])
+
+    def _more_subtitles(self, state):
+        player, item, stream = state["player"], state["item"], state["stream"]
+        player.command("show-text", "Searching for more subtitles…", 15000)
+
+        def fetch():
+            subs = self._library.subtitles(item, stream, fresh=True)
+            picked = more_subtitles(subs, preferred(self._settings.get("subtitle_language")), state.get("subs", ()))
+            with ThreadPoolExecutor(SUB_WORKERS) as pool:
+                list(pool.map(lambda sub: self._add_subtitle(state, sub), picked))
+            return len(picked)
+
+        def done(count):
+            if state is not self._active:
+                return
+            text = "Added %d subtitle%s, pick one under Subtitles" % (count, "" if count == 1 else "s") if count else "No more subtitles found"
+            player.command("show-text", text, 4000)
+
+        self._runner.run(fetch, done, lambda exc: done(0))
 
     def _versions(self, state):
         current = stream_id(state["stream"])
@@ -391,7 +433,7 @@ class PlaybackController(QObject):
         state["loaded"] = True
         player.set_versions(self._versions(state))
         item, stream = state["item"], state["stream"]
-        self._runner.run(lambda: self._setup_tracks(player, item, stream))
+        self._runner.run(lambda: self._setup_tracks(player, item, stream, state))
 
     def _original_language(self, item, tracks):
         if sum(1 for t in tracks if t.get("type") == "audio") < 2:
@@ -402,7 +444,7 @@ class PlaybackController(QObject):
             log.info("original language: %s", exc)
             return ""
 
-    def _setup_tracks(self, player, item, stream):
+    def _setup_tracks(self, player, item, stream, state):
         tracks = player.get("track-list", []) or []
         setting = self._settings.get("audio_language")
         original = self._original_language(item, tracks) if wants_original(setting) else ""
@@ -414,7 +456,7 @@ class PlaybackController(QObject):
         mode = self._settings.get("subtitle_mode")
         if wants_external(tracks, sub_langs, mode, (audio or {}).get("lang")):
             for sub in pick_subtitles(self._library.subtitles(item, stream), sub_langs):
-                player.add_subtitle(sub["url"], sub.get("title") or "Addon", sub["lang"])
+                self._add_subtitle(state, sub)
             tracks = player.get("track-list", []) or []
         sid = choose_subtitle(tracks, sub_langs, mode, (audio or {}).get("lang"))
         if sid is not None:

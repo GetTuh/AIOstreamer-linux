@@ -87,10 +87,16 @@ local function track_items(kind, property, allow_off)
     return items
 end
 
+local function subtitle_items()
+    local items = track_items("sub", "sid", true)
+    items[#items + 1] = { title = "Get more subtitles", hint = "search again", value = { "script-message", "aios-more-subs" } }
+    return items
+end
+
 local function menu()
     local items = {
         { title = "Audio", items = track_items("audio", "aid", false) },
-        { title = "Subtitles", items = track_items("sub", "sid", true) },
+        { title = "Subtitles", items = subtitle_items() },
     }
     if #versions > 1 then
         items[#items + 1] = { title = "Version", items = version_items() }

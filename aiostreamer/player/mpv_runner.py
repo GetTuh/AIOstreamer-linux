@@ -16,6 +16,7 @@ UPNEXT_SCRIPT = Path(__file__).with_name("upnext.lua")
 SKIP_SCRIPT = Path(__file__).with_name("skip.lua")
 UOSC_DIR = Path(__file__).with_name("uosc")
 UOSC_SCRIPT = UOSC_DIR / "scripts" / "uosc"
+SUB_TIMEOUT = 30.0
 UOSC_FONTS = UOSC_DIR / "fonts"
 DEFAULT_THEME = {"accent": "#3daee9", "surface": "#1a1f29", "background": "#0f1218", "text": "#f3f5f9"}
 PASSTHROUGH = "ac3,eac3,dts,dts-hd,truehd"
@@ -185,10 +186,13 @@ class MpvPlayer:
         self.command("script-message-to", "upnext", "aios-upnext-hide")
 
     def add_subtitle(self, url, title="", lang=""):
+        if self._mpv is None or self._exited.is_set():
+            return
         try:
-            self._mpv.command("sub-add", url, "auto", title or "", lang or "")
+            self._mpv.command("sub-add", url, "auto", title or "", lang or "", background=True, timeout=SUB_TIMEOUT)
         except Exception as exc:
-            log.warning("sub-add failed: %s", exc)
+            if not self._exited.is_set():
+                log.warning("sub-add failed: %s", exc)
 
     def command(self, *args):
         if self._mpv is None:

@@ -164,10 +164,10 @@ class AioClient:
     def _peek(self, url):
         return self.cache.peek(self.key(url))
 
-    def _cached(self, url, ttl, fresh=False):
+    def _cached(self, url, ttl, fresh=False, keep=None):
         if fresh:
             self.cache.drop(self.key(url))
-        return self.cache.get(self.key(url), ttl, lambda: self._get(url))
+        return self.cache.get(self.key(url), ttl, lambda: self._get(url), keep)
 
     def manifest(self, fresh=False):
         data = self._cached(self.url("manifest"), TTL["manifest"], fresh)
@@ -214,6 +214,7 @@ class AioClient:
             log.info("stream error: %s %s", error.get("name"), error.get("description"))
         return [s for s in streams if is_playable(s)]
 
-    def subtitles(self, kind, video_id, extra=None):
-        data = self._cached(self.url("subtitles", kind, video_id, extra), TTL["subtitles"])
+    def subtitles(self, kind, video_id, extra=None, fresh=False):
+        data = self._cached(self.url("subtitles", kind, video_id, extra), TTL["subtitles"], fresh,
+                            lambda d: bool((d or {}).get("subtitles")))
         return [s for s in (data or {}).get("subtitles") or [] if s.get("url") and s.get("lang")]

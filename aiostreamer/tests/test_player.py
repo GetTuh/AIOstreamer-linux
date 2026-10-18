@@ -7,7 +7,7 @@ import tempfile
 
 from aiostreamer.api.history import WatchState
 from aiostreamer.models.services import services
-from aiostreamer.player.playback import PlaybackController, media_title, pick_subtitles, proxy_headers, up_next_at, wants_external
+from aiostreamer.player.playback import PlaybackController, media_title, more_subtitles, pick_subtitles, proxy_headers, up_next_at, wants_external
 
 
 class MpvOptionsTest(unittest.TestCase):
@@ -150,8 +150,9 @@ class FakeLibrary:
         index = self.EPISODES.index(item["id"]) + 1
         return self.item(self.EPISODES[index]) if index < len(self.EPISODES) else None
 
-    def subtitles(self, item, stream=None):
+    def subtitles(self, item, stream=None, fresh=False):
         self.subtitle_calls += 1
+        self.fresh_calls = getattr(self, "fresh_calls", 0) + bool(fresh)
         return [{"url": "https://subs/%d" % i, "lang": lang} for i, lang in enumerate(["eng", "eng", "eng", "ger", "pob"])]
 
 
@@ -175,6 +176,13 @@ class HelpersTest(unittest.TestCase):
         subs = [{"url": "u%d" % i, "lang": lang} for i, lang in enumerate(["eng", "en", "eng", "ger", "fre", "eng"])]
         picked = pick_subtitles(subs, ["eng", "ger"])
         self.assertEqual([s["url"] for s in picked], ["u0", "u1", "u3"])
+
+    def test_more_subtitles_prefers_languages_and_skips_known(self):
+        subs = [{"url": "u%d" % i, "lang": lang} for i, lang in enumerate(["ger", "eng", "fre", "en", "eng", "ger"])]
+        subs.append({"url": "u1", "lang": "eng"})
+        picked = more_subtitles(subs, ["eng", "ger"], {"u4"})
+        self.assertEqual([s["url"] for s in picked], ["u1", "u3", "u0", "u5", "u2"])
+        self.assertEqual(len(more_subtitles(subs, ["eng"], set(), limit=2)), 2)
 
     def test_wants_external(self):
         internal = [{"type": "sub", "lang": "eng", "id": 1}]
@@ -268,6 +276,20 @@ class UpNextTest(unittest.TestCase):
         self.controller._on_file_loaded()
         self.assertEqual(self.player.subs, [])
         self.assertEqual(self.library.subtitle_calls, 1)
+
+    def test_get_more_subtitles_adds_unseen_fresh(self):
+        self.player.tracks = [{"type": "audio", "id": 1, "lang": "jpn", "selected": True}]
+        self.controller._on_file_loaded()
+        self.player.subs = []
+        self.controller._on_message(["aios-more-subs"])
+        self.assertEqual([u for u, _ in self.player.subs], ["https://subs/2", "https://subs/3", "https://subs/4"])
+        self.assertEqual(self.library.fresh_calls, 1)
+        texts = [c for c in self.player.calls if c[:2] == ("command", "show-text")]
+        self.assertIn("Added 3 subtitles", texts[-1][2])
+        self.player.subs = []
+        self.controller._on_message(["aios-more-subs"])
+        self.assertEqual(self.player.subs, [])
+        self.assertIn("No more subtitles", [c for c in self.player.calls if c[:2] == ("command", "show-text")][-1][2])
 
     def test_play_now_replaces_current_item_in_same_player(self):
         self.controller.play_now("e3", 120.0, "")

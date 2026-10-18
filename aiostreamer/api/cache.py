@@ -66,19 +66,19 @@ class JsonCache:
             log.debug("cache write failed: %s", exc)
             tmp.unlink(missing_ok=True)
 
-    def get(self, key, ttl, fetch):
+    def get(self, key, ttl, fetch, keep=None):
         hit = self.peek(key)
         if hit is not None and self._clock() - hit[0] < ttl:
             return hit[1]
         try:
-            return self._single(key, fetch)
+            return self._single(key, fetch, keep)
         except Exception:
             if hit is not None:
                 log.info("serving stale %s", key[-60:])
                 return hit[1]
             raise
 
-    def _single(self, key, fetch):
+    def _single(self, key, fetch, keep=None):
         with self._lock:
             flight = self._inflight.get(key)
             owner = flight is None
@@ -91,7 +91,8 @@ class JsonCache:
             return flight.value
         try:
             flight.value = fetch()
-            self.put(key, flight.value)
+            if keep is None or keep(flight.value):
+                self.put(key, flight.value)
             return flight.value
         except Exception as exc:
             flight.error = exc

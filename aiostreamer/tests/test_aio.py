@@ -168,6 +168,14 @@ class ClientTest(unittest.TestCase):
 
 
 class CacheTest(unittest.TestCase):
+    def test_rejected_values_are_not_cached(self):
+        cache = JsonCache(tempfile.mkdtemp(prefix="aios-cache-"))
+        answers = [{"subtitles": []}, {"subtitles": [{"url": "u"}]}]
+        keep = lambda d: bool(d["subtitles"])
+        self.assertEqual(cache.get("s", 60, lambda: answers.pop(0), keep), {"subtitles": []})
+        self.assertEqual(cache.get("s", 60, lambda: answers.pop(0), keep), {"subtitles": [{"url": "u"}]})
+        self.assertEqual(cache.get("s", 60, lambda: self.fail("refetched"), keep), {"subtitles": [{"url": "u"}]})
+
     def test_concurrent_requests_share_one_fetch(self):
         cache = JsonCache(tempfile.mkdtemp(prefix="aios-cache-"))
         calls = []
