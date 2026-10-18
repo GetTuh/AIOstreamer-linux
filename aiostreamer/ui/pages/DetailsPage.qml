@@ -11,6 +11,7 @@ FocusScope {
     property string itemId
     readonly property alias d: details
     property bool focusedOnce: false
+    readonly property bool hasSeries: details.itemType === "Episode" && details.seriesId.length > 0
 
     signal openItem(var entry)
     signal openSources(var model)
@@ -225,6 +226,7 @@ FocusScope {
 
             TvButton {
                 id: resumeButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 visible: details.playable && details.resumeSeconds > 0
                 primary: true
                 icon: "▶"
@@ -237,6 +239,7 @@ FocusScope {
 
             TvButton {
                 id: playButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 visible: details.playable
                 primary: !resumeButton.visible
                 icon: resumeButton.visible ? "↺" : "▶"
@@ -250,6 +253,7 @@ FocusScope {
 
             TvButton {
                 id: versionButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 visible: details.playable && (details.sourceCount > 1 || details.sourcesLoading)
                 icon: "☰"
                 text: details.sourcesLoading ? "Versions…" : "Version (" + details.sourceCount + ")"
@@ -260,6 +264,7 @@ FocusScope {
 
             TvButton {
                 id: watchedButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 icon: details.played ? "✓" : "○"
                 text: details.played ? "Watched" : "Mark watched"
                 KeyNavigation.left: versionButton.visible ? versionButton : (playButton.visible ? playButton : null)
@@ -269,31 +274,37 @@ FocusScope {
 
             TvButton {
                 id: favoriteButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 icon: details.favorite ? "♥" : "♡"
                 text: details.favorite ? "Favorite" : "Add favorite"
                 KeyNavigation.left: watchedButton
-                KeyNavigation.right: trailerButton.visible ? trailerButton : (seriesButton.visible ? seriesButton : null)
+                KeyNavigation.right: trailerButton.visible ? trailerButton : null
                 onClicked: details.toggleFavorite()
             }
 
             TvButton {
                 id: trailerButton
+                KeyNavigation.down: page.hasSeries ? seriesButton : null
                 visible: hero.supported
                 dimmed: hero.status !== "ready"
                 busy: hero.status === "loading"
                 icon: "▶"
                 text: hero.status === "none" ? "No trailer" : "Trailer"
                 KeyNavigation.left: favoriteButton
-                KeyNavigation.right: seriesButton.visible ? seriesButton : null
                 onClicked: trailerControls.enter(trailerButton)
             }
+        }
+
+        Row {
+            visible: page.hasSeries
+            height: 76
+            topPadding: 6
 
             TvButton {
                 id: seriesButton
-                visible: details.itemType === "Episode" && details.seriesId.length > 0
                 icon: "▤"
-                text: "Series"
-                KeyNavigation.left: trailerButton.visible ? trailerButton : favoriteButton
+                text: details.seriesName ? "All episodes of " + details.seriesName : "Series"
+                KeyNavigation.up: page.primaryButton()
                 onClicked: page.openItem({ itemId: details.seriesId, itemType: "Series", name: details.seriesName })
             }
         }
