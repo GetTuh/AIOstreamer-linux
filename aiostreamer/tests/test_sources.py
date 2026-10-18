@@ -39,8 +39,15 @@ class SourcesTest(unittest.TestCase):
         self.assertEqual(sources.describe(stream("b", "1080p"))["hdr"], "SDR")
 
     def test_season_pack_size(self):
-        self.assertEqual(sources.describe(stream("p", "1080p", 2_950_000_000, folder=5_900_000_000))["size"], "2.95 GB of 5.90 GB")
-        self.assertEqual(sources.describe(stream("p", "1080p", 2_950_000_000, folder=3_000_000_000))["size"], "2.95 GB")
+        packed = sources.describe(stream("p", "1080p", 2_950_000_000, folder=5_900_000_000))
+        self.assertEqual((packed["size"], packed["pack"]), ("2.95 GB", "Pack 5.90 GB"))
+        self.assertEqual(sources.describe(stream("p", "1080p", 2_950_000_000, folder=3_000_000_000))["pack"], "")
+        hinted = {"url": "u", "behaviorHints": {"filename": "a.mkv", "videoSize": 242704598, "folderSize": 40057706460}}
+        self.assertEqual(sources.describe(hinted)["pack"], "Pack 40.1 GB")
+        described = {"url": "u", "behaviorHints": {"filename": "b.mkv", "videoSize": 828719564},
+                     "description": "Naruto\n❖ 829 MB / 1.02 TB · 4.77 Mbps"}
+        self.assertEqual(sources.describe(described)["pack"], "Pack 1.02 TB")
+        self.assertIn("Pack 1.02 TB", sources.short_label(described))
 
     def test_fallbacks_without_stream_data(self):
         bare = {"url": "https://x", "name": "Fake 720p", "behaviorHints": {"videoSize": 900_000_000}}

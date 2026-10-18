@@ -24,6 +24,8 @@ AUDIO_RES = [
     ("DD+", r"DDP|DD\+|E-?AC-?3"), ("DD", r"DD|AC-?3"), ("Opus", r"Opus"), ("AAC", r"AAC"), ("FLAC", r"FLAC"),
 ]
 CHANNELS_RE = re.compile(r"(?<!\d)([2-7])[ .]([01])(?!\d)")
+PACK_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([MGT])B\s*/\s*(\d+(?:\.\d+)?)\s*([MGT])B", re.I)
+UNIT = {"M": 1000 ** 2, "G": 1000 ** 3, "T": 1000 ** 4}
 SERVICE_TAG_RE = re.compile(r"\[(%s)\]" % "|".join(sorted(set(SERVICE_LABEL.values()), key=len, reverse=True)))
 
 
@@ -114,12 +116,28 @@ def size_bytes(stream):
     return int(data.get("size") or (stream.get("behaviorHints") or {}).get("videoSize") or 0)
 
 
+def folder_bytes(stream):
+    data = stream.get("streamData") or {}
+    folder = int(data.get("folderSize") or (stream.get("behaviorHints") or {}).get("folderSize") or 0)
+    if folder:
+        return folder
+    match = PACK_RE.search(stream.get("description") or "")
+    return int(float(match.group(3)) * UNIT[match.group(4).upper()]) if match else 0
+
+
+def pack_size(stream):
+    size, folder = size_bytes(stream), folder_bytes(stream)
+    return folder if size and folder > size * 1.2 else 0
+
+
 def bitrate(stream, runtime):
     size = size_bytes(stream)
     return int(size * 8 / runtime) if size and runtime else 0
 
 
 def format_size(size):
+    if size >= 1000 ** 4:
+        return "%.2f TB" % (size / 1000 ** 4)
     if size >= 100 * 1000 ** 3:
         return "%d GB" % round(size / 1000 ** 3)
     if size >= 10 * 1000 ** 3:
@@ -141,7 +159,6 @@ def describe(stream):
     tags = [t for t in info.get("visualTags") or [] if t in HDR_TAGS]
     audio = " ".join((info.get("audioTags") or [])[:2] + (info.get("audioChannels") or [])[:1])
     size = size_bytes(stream)
-    folder = int(data.get("folderSize") or 0)
     name_lines = clean_lines(stream.get("name"))
     return {
         "id": stream_id(stream),
@@ -150,7 +167,8 @@ def describe(stream):
         "hdr": " ".join(tags[:2]) if tags else ("SDR" if res else ""),
         "codec": CODEC_LABEL.get((info.get("encode") or "").upper(), info.get("encode") or ""),
         "audio": audio,
-        "size": format_size(size) + (" of %s" % format_size(folder) if size and folder > size * 1.2 else ""),
+        "size": format_size(size),
+        "pack": "Pack %s" % format_size(pack_size(stream)) if pack_size(stream) else "",
         "service": service_label(stream),
         "title": filename(stream) or " · ".join(clean_lines(stream.get("description"))[:2]),
         "name": " ".join(name_lines[:2]) or data.get("addon") or "",
@@ -160,7 +178,7 @@ def describe(stream):
 
 def short_label(stream):
     info = describe(stream)
-    return " · ".join(p for p in (info["resolution"], info["quality"], info["hdr"], info["codec"], info["audio"], info["size"], info["service"]) if p)
+    return " · ".join(p for p in (info["resolution"], info["quality"], info["hdr"], info["codec"], info["audio"], info["size"], info["pack"], info["service"]) if p)
 
 
 def _caps():
