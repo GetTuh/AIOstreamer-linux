@@ -2,8 +2,10 @@ local overlay = mp.create_osd_overlay("ass-events")
 overlay.res_x = 1920
 overlay.res_y = 1080
 
-local state = { visible = false, series = "", title = "", remaining = 0, autoplay = false, accent = "&HE9AE3D&" }
+local state = { visible = false, series = "", title = "", remaining = 0, autoplay = false, accent = "&HE9AE3D&",
+                loading = false, switched = false, dots = 0 }
 local timer = nil
+local LOADING_TIMEOUT = 60
 local PLAY_KEYS = { "ENTER", "KP_ENTER" }
 local BACK_KEYS = { "ESC", "GO_BACK", "MBTN_BACK", "BS" }
 
@@ -31,6 +33,7 @@ local function ass_color(hex)
 end
 
 local function render()
+    mp.set_property("user-data/aios/upnext", state.loading and "loading" or (state.visible and "shown" or ""))
     if not state.visible then
         overlay:remove()
         return
@@ -41,11 +44,18 @@ local function render()
         "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c&H291F1A&\\1a&H08&\\p1}m 0 0 l %d 0 %d %d 0 %d{\\p0}",
         x, y, w, w, h, h)
     local accent = string.format("{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}m 0 0 l 8 0 8 %d 0 %d{\\p0}", x, y, state.accent, h, h)
-    local head = string.format("{\\an7\\pos(%d,%d)\\fs30\\b1\\bord0\\shad0\\1c%s}UP NEXT", x + 40, y + 28, state.accent)
+    local head = string.format("{\\an7\\pos(%d,%d)\\fs30\\b1\\bord0\\shad0\\1c%s}%s", x + 40, y + 28, state.accent,
+        state.loading and "LOADING" or "UP NEXT")
     local series = string.format("{\\an7\\pos(%d,%d)\\fs34\\bord0\\shad0\\1c&HBAABA3&}%s", x + 40, y + 70, escape(shorten(state.series, 40)))
     local title = string.format("{\\an7\\pos(%d,%d)\\fs42\\b1\\bord0\\shad0\\1c&HF9F5F3&\\q2}%s", x + 40, y + 110, escape(shorten(state.title, 44)))
-    local hint = state.autoplay and string.format("Playing in %ds  ·  OK play now  ·  Back dismiss", state.remaining)
-        or "OK play now  ·  Back dismiss"
+    local hint
+    if state.loading then
+        hint = "Loading next episode" .. string.rep(".", state.dots + 1)
+    elseif state.autoplay then
+        hint = string.format("Playing in %ds  ·  OK play now  ·  Back dismiss", state.remaining)
+    else
+        hint = "OK play now  ·  Back dismiss"
+    end
     local foot = string.format("{\\an7\\pos(%d,%d)\\fs28\\bord0\\shad0\\1c&HBAABA3&}%s", x + 40, y + 176, hint)
     overlay.data = table.concat({ box, accent, head, series, title, foot }, "\n")
     overlay:update()
@@ -58,6 +68,8 @@ end
 
 local function hide()
     state.visible = false
+    state.loading = false
+    state.switched = false
     if timer then
         timer:kill()
         timer = nil
@@ -68,6 +80,19 @@ end
 
 local function play()
     hide()
+    state.visible = true
+    state.loading = true
+    state.dots = 0
+    local started = mp.get_time()
+    timer = mp.add_periodic_timer(0.5, function()
+        if mp.get_time() - started > LOADING_TIMEOUT then
+            hide()
+            return
+        end
+        state.dots = (state.dots + 1) % 3
+        render()
+    end)
+    render()
     mp.commandv("script-message", "aios-upnext-play")
 end
 
@@ -102,4 +127,15 @@ end
 
 mp.register_script_message("aios-upnext-show", show)
 mp.register_script_message("aios-upnext-hide", hide)
-mp.register_event("end-file", hide)
+mp.register_event("end-file", function()
+    if state.loading then
+        state.switched = true
+    else
+        hide()
+    end
+end)
+mp.register_event("playback-restart", function()
+    if state.loading and state.switched then
+        hide()
+    end
+end)
