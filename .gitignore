@@ -6,3 +6,4 @@ build/
 repo/
 *.flatpak
 packaging/flatpak/shared-modules/
+.env
