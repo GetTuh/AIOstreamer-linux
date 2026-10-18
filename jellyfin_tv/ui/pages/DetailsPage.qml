@@ -177,7 +177,7 @@ FocusScope {
         Text {
             width: parent.width
             text: {
-                var parts = [details.year, details.runtime, details.officialRating]
+                var parts = [details.year, details.runtime]
                 if (details.communityRating)
                     parts.push("★ " + details.communityRating)
                 parts.push(details.genres)
@@ -307,15 +307,6 @@ FocusScope {
             }
         }
 
-        Text {
-            visible: text.length > 0
-            width: parent.width
-            text: details.tagline
-            color: Theme.text
-            font.pixelSize: Theme.fontBody
-            font.italic: true
-            wrapMode: Text.WordWrap
-        }
 
         Text {
             width: parent.width

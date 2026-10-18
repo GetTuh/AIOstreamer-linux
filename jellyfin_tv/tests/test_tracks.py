@@ -1,6 +1,6 @@
 import unittest
 
-from jellyfin_tv.player.tracks import canonical, choose_audio, choose_subtitle, preferred, wants_original
+from jellyfin_tv.player.tracks import canonical, choose_audio, choose_subtitle, preferred
 
 TRACKS = [
     {"type": "audio", "id": 1, "lang": "fre", "default": True},
@@ -20,20 +20,16 @@ class TracksTest(unittest.TestCase):
         self.assertEqual(preferred("eng,en"), ["eng"])
         self.assertEqual(canonical("und"), "")
 
-    def test_original_resolves_to_item_language(self):
-        self.assertEqual(preferred("original", "ja"), ["jpn"])
-        self.assertEqual(preferred("original,eng", "fr"), ["fre", "eng"])
-        self.assertEqual(preferred("original", ""), [])
-        self.assertTrue(wants_original("original"))
-        self.assertFalse(wants_original("eng,en"))
+    def test_old_original_setting_is_ignored(self):
+        self.assertEqual(preferred("original,eng"), ["eng"])
 
-    def test_original_audio_beats_default_dub(self):
+    def test_audio_language_beats_default_track(self):
         tracks = [
             {"type": "audio", "id": 1, "lang": "fre", "default": True},
             {"type": "audio", "id": 2, "lang": "fre"},
             {"type": "audio", "id": 3, "lang": "eng"},
         ]
-        self.assertEqual(choose_audio(tracks, preferred("original", "en")), 3)
+        self.assertEqual(choose_audio(tracks, preferred("eng")), 3)
 
     def test_foreign_audio_gets_full_english(self):
         self.assertEqual(choose_subtitle(TRACKS, ENG, "auto", "fre"), 4)

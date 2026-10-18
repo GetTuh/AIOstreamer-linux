@@ -54,10 +54,6 @@ class JsonCache:
         self._remember(key, entry)
         return entry
 
-    def age(self, key):
-        entry = self.peek(key)
-        return None if entry is None else self._clock() - entry[0]
-
     def put(self, key, value):
         entry = (self._clock(), value)
         self._remember(key, entry)

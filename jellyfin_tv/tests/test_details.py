@@ -42,6 +42,10 @@ class FakeLibrary:
         return [stream("remux", "2160p", 72_000_000_000), stream("web", "2160p", 9_000_000_000)]
 
 
+def selected(model):
+    return next(s["id"] for s in model.sources if s["selected"])
+
+
 class DetailsPlayTest(unittest.TestCase):
     def setUp(self):
         app()
@@ -63,10 +67,10 @@ class DetailsPlayTest(unittest.TestCase):
         self.assertTrue(self.model.sourcesLoading)
         self.model.play(0)
         self.model.play(5.0)
-        self.assertTrue(self.model.playPending)
+        self.assertIsNotNone(self.model._pending_play)
         self.assertEqual(self.played, [])
         self.runner.flush()
-        self.assertFalse(self.model.playPending)
+        self.assertIsNone(self.model._pending_play)
         self.assertEqual(self.played, [(5.0, "web")])
 
     def test_play_after_sources_is_immediate(self):
@@ -93,20 +97,14 @@ class DetailsPlayTest(unittest.TestCase):
         self.assertEqual(model.sourceCount, 2)
         self.assertEqual(services.library.stream_calls[-1], ("unknown", False))
 
-    def test_refresh_sources_bypasses_cache(self):
-        self.runner.flush()
-        self.model.refreshSources()
-        self.runner.flush()
-        self.assertEqual(services.library.stream_calls[-1], ("movie", True))
-
     def test_select_source_is_remembered(self):
         self.runner.flush()
         self.model.selectSource("remux")
-        self.assertEqual(self.model.selectedSourceId, "remux")
+        self.assertEqual(selected(self.model), "remux")
         other = DetailsModel()
         other.itemId = "movie"
         self.runner.flush()
-        self.assertEqual(other.selectedSourceId, "remux")
+        self.assertEqual(selected(other), "remux")
 
     def test_non_playable_item_stops_loading(self):
         services.library.known = lambda item_id: {"type": "Series"}

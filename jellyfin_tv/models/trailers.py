@@ -94,8 +94,7 @@ class TrailerPreview(QObject):
 
     @Slot(str, result=str)
     def cached(self, url):
-        server = getattr(self._library.session, "server", "") or ""
-        if not url.startswith(("http://", "https://")) or (server and url.startswith(server)):
+        if not url.startswith(("http://", "https://")):
             return url
         return self._cache.local_url(url)
 

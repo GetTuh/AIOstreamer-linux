@@ -32,17 +32,8 @@ class ManualRunner:
             on_done(result)
 
 
-class FakeSession:
-    server = "http://srv"
-    token = "TOKEN"
-
-    def url(self, path, **params):
-        return "%s/%s?%s" % (self.server, path, "&".join("%s=%s" % kv for kv in params.items()))
-
-
 class FakeLibrary:
     def __init__(self, trailers=None):
-        self.session = FakeSession()
         self.data = trailers or {}
         self.calls = []
 
@@ -282,7 +273,6 @@ class TrailerPreviewTest(unittest.TestCase):
                 return "http://127.0.0.1:1/x"
         self.preview._cache = Cache()
         self.assertEqual(self.preview.cached("https://v/video"), "http://127.0.0.1:1/x")
-        self.assertEqual(self.preview.cached("http://srv/Videos/t1/stream?ApiKey=TOKEN"), "http://srv/Videos/t1/stream?ApiKey=TOKEN")
         self.assertEqual(self.preview.cached(""), "")
 
     def test_turning_off_stops_playing_trailer(self):

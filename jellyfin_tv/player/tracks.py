@@ -31,7 +31,6 @@ LANGUAGE_ALIASES = {
     "te": "tel", "telugu": "tel",
     "und": "",
 }
-ORIGINAL = "original"
 FORCED_WORDS = ("forced", "signs", "songs")
 SDH_WORDS = ("sdh", "cc", "hearing")
 
@@ -41,19 +40,13 @@ def canonical(lang):
     return LANGUAGE_ALIASES.get(lang, lang)
 
 
-def preferred(setting, original=""):
+def preferred(setting):
     langs = []
     for part in (setting or "").split(","):
         lang = canonical(part)
-        if lang == ORIGINAL:
-            lang = canonical(original)
-        if lang and lang not in langs:
+        if lang and lang not in langs and lang != "original":
             langs.append(lang)
     return langs
-
-
-def wants_original(setting):
-    return ORIGINAL in [canonical(part) for part in (setting or "").split(",")]
 
 
 def _title(track):

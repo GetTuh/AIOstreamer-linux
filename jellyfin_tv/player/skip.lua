@@ -1,5 +1,3 @@
-local utils = require "mp.utils"
-
 local overlay = mp.create_osd_overlay("ass-events")
 overlay.res_x = 1920
 overlay.res_y = 1080
@@ -14,7 +12,6 @@ local BACK_KEYS = { "ESC", "GO_BACK", "MBTN_BACK", "BS" }
 
 local mode = mp.get_opt("jftv-skip") or "ask"
 local accent = mp.get_opt("jftv-accent") or "3daee9"
-local server_segments = {}
 local segments = {}
 local current = nil
 local handled = {}
@@ -47,15 +44,7 @@ local function chapter_segments()
 end
 
 local function rebuild()
-    segments = {}
-    for _, segment in ipairs(server_segments) do
-        if LABELS[segment.kind] then
-            segments[#segments + 1] = segment
-        end
-    end
-    if #segments == 0 then
-        segments = chapter_segments()
-    end
+    segments = chapter_segments()
 end
 
 local function unbind()
@@ -128,13 +117,7 @@ local function check(_, position)
     end
 end
 
-mp.register_script_message("jftv-segments", function(json)
-    server_segments = utils.parse_json(json) or {}
-    rebuild()
-end)
-
 mp.register_event("file-loaded", function()
-    server_segments = {}
     handled = {}
     hide()
     rebuild()

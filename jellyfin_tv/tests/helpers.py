@@ -49,11 +49,9 @@ class FakeSettings:
             "subtitle_mode": "auto",
             "mpv_extra": "",
             "max_resolution": 0,
-            "prefer_hdr": True,
             "max_bitrate": 0,
             "player_ui": "overlay",
             "audio_output": "auto",
-            "remote_control": False,
             "skip_segments": "ask",
             "trailer_previews": "muted",
             "gamepad": True,
@@ -63,8 +61,6 @@ class FakeSettings:
         self.values.update(values)
         self.sources = {}
         self.mpv_conf_path = Path(_tmp) / "missing-mpv.conf"
-        self.device_id = "test-device"
-        self.device_name = "test"
 
     def get(self, key):
         return self.values.get(key)

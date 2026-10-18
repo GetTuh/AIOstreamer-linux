@@ -167,7 +167,7 @@ FocusScope {
         Text {
             width: parent.width
             text: {
-                var parts = [details.year, details.officialRating]
+                var parts = [details.year]
                 if (details.communityRating)
                     parts.push("★ " + details.communityRating)
                 parts.push(details.genres)

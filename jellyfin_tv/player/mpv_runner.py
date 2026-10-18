@@ -88,7 +88,7 @@ def uosc_script_opts(theme):
     return ",".join("uosc-%s=%s" % (k, "[%s]" % v if "," in v and not v.startswith("[") else v) for k, v in opts.items())
 
 
-def build_options(settings, title="", start=0.0, extra=None, original="", theme=None):
+def build_options(settings, title="", start=0.0, extra=None, theme=None):
     theme = dict(DEFAULT_THEME, **(theme or {}))
     overlay = settings.get("player_ui") != "native"
     scripts = [str(REMOTE_SCRIPT), str(UPNEXT_SCRIPT), str(SKIP_SCRIPT)]
@@ -114,7 +114,7 @@ def build_options(settings, title="", start=0.0, extra=None, original="", theme=
     if start and start > 1:
         options["start"] = "%.3f" % start
     options.update(AUDIO_OUTPUTS.get(settings.get("audio_output"), {}))
-    audio = ",".join(preferred(settings.get("audio_language"), original))
+    audio = ",".join(preferred(settings.get("audio_language")))
     subs = settings.get("subtitle_language")
     if audio:
         options["alang"] = audio
@@ -177,9 +177,6 @@ class MpvPlayer:
 
     def show_up_next(self, series, title, seconds, autoplay, accent=""):
         self.command("script-message-to", "upnext", "jftv-upnext-show", series, title, str(int(seconds)), "yes" if autoplay else "no", _hex(accent))
-
-    def set_segments(self, segments):
-        self.command("script-message-to", "skip", "jftv-segments", json.dumps(segments))
 
     def set_versions(self, versions):
         self.command("script-message-to", "remote", "jftv-versions", json.dumps(versions))

@@ -48,7 +48,7 @@ class WatchState:
         self._data["items"][item["id"]] = slim(item)
         if touch_show and item.get("type") == "Episode" and item.get("seriesId"):
             show = self._data["shows"].setdefault(item["seriesId"], {})
-            show.update({"last": item["id"], "updated": self._clock(), "hidden": False,
+            show.update({"last": item["id"], "updated": self._clock(),
                          "item": {"id": item["seriesId"], "type": "Series", "stremioType": item.get("stremioType", "series"),
                                   "name": item.get("seriesName", ""), "poster": item.get("poster", ""),
                                   "background": item.get("background", ""), "logo": item.get("logo", "")}})
@@ -86,9 +86,6 @@ class WatchState:
     def watched(self, item_id):
         return item_id in self._data["watched"]
 
-    def watched_at(self, item_id):
-        return self._data["watched"].get(item_id)
-
     def progress(self, item_id):
         entry = self._data["progress"].get(item_id)
         return (entry["position"], entry.get("duration") or 0) if entry else (0.0, 0.0)
@@ -118,16 +115,10 @@ class WatchState:
 
     def recent_shows(self, limit=24):
         shows = sorted(self._data["shows"].items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)
-        return [(series_id, dict(entry)) for series_id, entry in shows[:limit] if not entry.get("hidden")]
+        return [(series_id, dict(entry)) for series_id, entry in shows[:limit]]
 
     def last_episode(self, series_id):
         return (self._data["shows"].get(series_id) or {}).get("last")
-
-    def hide_show(self, series_id):
-        with self._lock:
-            if series_id in self._data["shows"]:
-                self._data["shows"][series_id]["hidden"] = True
-                self._save()
 
     def favorite(self, item_id):
         return item_id in self._data["favorites"]

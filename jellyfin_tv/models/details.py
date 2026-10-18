@@ -128,18 +128,6 @@ class DetailsModel(QObject):
         if pending is not None and self._sources:
             self.playRequested.emit(pending, self._selected)
 
-    @Slot()
-    def refreshSources(self):
-        if not self.playable or self._sources_loading:
-            return
-        item = self._item
-        self._sources_loading = True
-        self.changed.emit()
-        services.runner.run(
-            lambda: services.library.streams(item, fresh=True),
-            lambda sources: item.get("id") == self._id and self._sources_loaded(sources),
-            lambda exc: item.get("id") == self._id and self._sources_failed(exc))
-
     @Slot(float)
     def play(self, seconds):
         if self._sources_loading:
@@ -147,10 +135,6 @@ class DetailsModel(QObject):
             self.changed.emit()
             return
         self.playRequested.emit(seconds, self._selected)
-
-    @Property(bool, notify=changed)
-    def playPending(self):
-        return self._pending_play is not None
 
     @Property(bool, notify=changed)
     def sourcesLoading(self):
@@ -189,10 +173,6 @@ class DetailsModel(QObject):
         return self._get("type", "")
 
     @Property(str, notify=changed)
-    def stremioType(self):
-        return self._get("stremioType", "")
-
-    @Property(str, notify=changed)
     def name(self):
         return self._get("name", "")
 
@@ -209,20 +189,12 @@ class DetailsModel(QObject):
         return self._get("overview", "")
 
     @Property(str, notify=changed)
-    def tagline(self):
-        return ""
-
-    @Property(str, notify=changed)
     def year(self):
         return self._get("year", "")
 
     @Property(str, notify=changed)
     def runtime(self):
         return m.runtime_text(self._get("runtime", 0))
-
-    @Property(str, notify=changed)
-    def officialRating(self):
-        return ""
 
     @Property(str, notify=changed)
     def communityRating(self):
@@ -239,10 +211,6 @@ class DetailsModel(QObject):
     @Property(str, notify=changed)
     def logo(self):
         return image_source(self._item, "logo") if self._item else ""
-
-    @Property(str, notify=changed)
-    def poster(self):
-        return image_source(self._item, "poster") if self._item else ""
 
     @Property(float, notify=changed)
     def resumeSeconds(self):
@@ -311,10 +279,6 @@ class DetailsModel(QObject):
             info["selected"] = info["id"] == self._selected
             out.append(info)
         return out
-
-    @Property(str, notify=changed)
-    def selectedSourceId(self):
-        return self._selected
 
     @Property(str, notify=changed)
     def selectedSourceLabel(self):

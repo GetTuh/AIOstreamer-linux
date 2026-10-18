@@ -16,7 +16,6 @@ from jellyfin_tv.api.aio import USER_AGENT
 log = logging.getLogger("jellyfin_tv.images")
 
 PROVIDER_ID = "img"
-WIDTHS = {"poster": 360, "thumb": 560, "backdrop": 1920, "logo": 800}
 CACHE_LIMIT_BYTES = 600 * 1024 * 1024
 FAILED_RETRY_S = 600
 

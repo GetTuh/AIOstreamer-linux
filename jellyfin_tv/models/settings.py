@@ -1,6 +1,4 @@
 import os
-import socket
-import uuid
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QSettings, Signal
@@ -50,8 +48,6 @@ class Settings(QObject):
     def __init__(self):
         super().__init__()
         self._store = QSettings(str(config_dir() / "settings.ini"), QSettings.IniFormat)
-        if not self._store.value("device_id"):
-            self._store.setValue("device_id", uuid.uuid4().hex)
 
     def get(self, key):
         default = self.DEFAULTS.get(key)
@@ -78,14 +74,6 @@ class Settings(QObject):
     def set_source(self, item_id, source_id):
         self._store.setValue("sources/%s" % item_id, source_id)
         self._store.sync()
-
-    @property
-    def device_id(self):
-        return self._store.value("device_id")
-
-    @property
-    def device_name(self):
-        return socket.gethostname() or "Linux TV"
 
     @property
     def mpv_conf_path(self):
