@@ -454,13 +454,16 @@ class PlaybackController(QObject):
         audio = next((t for t in tracks if t.get("type") == "audio" and (t.get("id") == aid or (aid is None and t.get("selected")))), None)
         sub_langs = preferred(self._settings.get("subtitle_language"))
         mode = self._settings.get("subtitle_mode")
+        sid = choose_subtitle(tracks, sub_langs, mode, (audio or {}).get("lang"))
+        if sid is not None:
+            player.command("set_property", "sid", sid)
         if wants_external(tracks, sub_langs, mode, (audio or {}).get("lang")):
             for sub in pick_subtitles(self._library.subtitles(item, stream), sub_langs):
                 self._add_subtitle(state, sub)
             tracks = player.get("track-list", []) or []
-        sid = choose_subtitle(tracks, sub_langs, mode, (audio or {}).get("lang"))
-        if sid is not None:
-            player.command("set_property", "sid", sid)
+            sid = choose_subtitle(tracks, sub_langs, mode, (audio or {}).get("lang"))
+            if sid is not None:
+                player.command("set_property", "sid", sid)
 
     @Slot()
     def _on_restart(self):

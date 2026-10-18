@@ -21,6 +21,7 @@ class MpvOptionsTest(unittest.TestCase):
         self.assertEqual(options["target-colorspace-hint"], "yes")
         self.assertEqual(options["fullscreen"], "yes")
         self.assertEqual(options["slang"], "eng,en")
+        self.assertEqual(options["subs-fallback"], "no")
         self.assertNotIn("start", options)
         self.assertNotIn("include", options)
 

@@ -122,6 +122,7 @@ def build_options(settings, title="", start=0.0, extra=None, theme=None):
         options["alang"] = audio
     if subs:
         options["slang"] = subs
+        options["subs-fallback"] = "no"
     mode = settings.get("subtitle_mode")
     if mode == "off":
         options["sid"] = "no"

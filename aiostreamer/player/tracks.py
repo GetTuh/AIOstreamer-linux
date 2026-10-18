@@ -43,6 +43,17 @@ COUNTRY_LANGUAGES = {
     "turkey": "tur", "türkiye": "tur", "india": "hin", "thailand": "tha", "indonesia": "ind", "vietnam": "vie",
     "czech republic": "cze", "czechia": "cze", "hungary": "hun", "greece": "gre", "israel": "heb", "romania": "rum",
     "egypt": "ara", "saudi arabia": "ara", "iran": "per",
+    "us": "eng", "gb": "eng", "gbr": "eng", "ca": "eng", "can": "eng", "au": "eng", "aus": "eng", "ie": "eng", "irl": "eng",
+    "nz": "eng", "nzl": "eng", "za": "eng", "zaf": "eng",
+    "jp": "jpn", "jpn": "jpn", "kr": "kor", "kor": "kor", "prk": "kor", "cn": "chi", "chn": "chi", "hk": "chi", "hkg": "chi",
+    "tw": "chi", "twn": "chi", "fr": "fre", "fra": "fre", "de": "ger", "deu": "ger", "at": "ger", "aut": "ger",
+    "es": "spa", "esp": "spa", "mx": "spa", "mex": "spa", "ar": "spa", "arg": "spa", "co": "spa", "col": "spa",
+    "it": "ita", "ita": "ita", "br": "por", "bra": "por", "pt": "por", "prt": "por", "nl": "dut", "nld": "dut",
+    "pl": "pol", "pol": "pol", "se": "swe", "swe": "swe", "no": "nor", "nor": "nor", "dk": "dan", "dnk": "dan",
+    "fi": "fin", "fin": "fin", "ru": "rus", "rus": "rus", "ua": "ukr", "ukr": "ukr", "tr": "tur", "tur": "tur",
+    "in": "hin", "ind": "hin", "th": "tha", "tha": "tha", "id": "ind", "idn": "ind", "vn": "vie", "vnm": "vie",
+    "cz": "cze", "cze": "cze", "hu": "hun", "hun": "hun", "gr": "gre", "grc": "gre", "il": "heb", "isr": "heb",
+    "ro": "rum", "rou": "rum", "eg": "ara", "egy": "ara", "sa": "ara", "sau": "ara", "ir": "per", "irn": "per",
 }
 ORIGINAL_WORDS = ("original", " vo ", "[vo]", "(vo)")
 FORCED_WORDS = ("forced", "signs", "songs")

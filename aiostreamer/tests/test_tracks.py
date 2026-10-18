@@ -26,6 +26,9 @@ class TracksTest(unittest.TestCase):
 
     def test_original_language_from_country(self):
         self.assertEqual(country_language("Japan"), "jpn")
+        self.assertEqual(country_language("jpn"), "jpn")
+        self.assertEqual(country_language("usa"), "eng")
+        self.assertEqual(country_language("FR"), "fre")
         self.assertEqual(country_language("United States, United Kingdom"), "eng")
         self.assertEqual(country_language("Atlantis"), "")
         self.assertTrue(wants_original("original,eng,en"))

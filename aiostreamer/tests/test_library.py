@@ -211,6 +211,7 @@ AIOMETADATA = {
         {"type": "movie", "id": "tmdb.top", "name": "TMDB Popular", "extra": [{"name": "skip"}]},
         {"type": "anime", "id": "mal.top_anime", "name": "MAL Top Anime", "extra": [{"name": "skip"}]},
         {"type": "movie", "id": "search.movie", "name": "Movies Search", "extra": [{"name": "search", "isRequired": True}]},
+        {"type": "series", "id": "search.series", "name": "Series Search", "extra": [{"name": "search", "isRequired": True}]},
         {"type": "anime.series", "id": "search.anime_series", "name": "Anime Series Search", "extra": [{"name": "search", "isRequired": True}]},
     ],
 }
@@ -256,9 +257,36 @@ class MetadataAddonTest(unittest.TestCase):
         self.assertEqual([i["id"] for i in movies], ["search.movie:dune"])
         self.assertEqual(self.own.searched, ["ae72eb9.lib"])
         shows = self.lib.search("naruto", "Series")
-        self.assertEqual(shows[0]["id"], "search.anime_series:naruto")
+        self.assertEqual(shows[0]["id"], "search.series:naruto")
+        self.assertEqual(self.meta.searched[-2:], ["search.series", "search.anime_series"])
         self.assertEqual(m.kind_for("anime.series"), "Series")
         self.assertEqual(m.kind_for("anime.movie"), "Movie")
+
+    def test_search_drops_same_show_from_anime_search(self):
+        def catalog(kind, catalog_id, extra=None):
+            if catalog_id == "search.anime_series":
+                return [{"id": "kitsu:1555", "type": "series", "name": "Naruto: Shippuden"},
+                        {"id": "kitsu:7", "type": "series", "name": "Dune", "releaseInfo": "1984"},
+                        {"id": "kitsu:8", "type": "series", "name": "Other", "imdb_id": "tt0988824"}]
+            return [{"id": "tt0988824", "type": "series", "name": "Naruto Shippuden", "releaseInfo": "2007-2017"},
+                    {"id": "tt2", "type": "series", "name": "Dune", "releaseInfo": "2021"}]
+        self.meta.catalog = catalog
+        self.assertEqual([i["id"] for i in self.lib.search("x", "Series")][:3], ["tt0988824", "tt2", "kitsu:7"])
+
+    def test_subtitles_retry_with_absolute_episode(self):
+        asked = []
+
+        def subtitles(kind, video, extra=None, fresh=False):
+            asked.append(video)
+            return [{"url": "u", "lang": "eng"}] if video == "tt0903747:1:3" else []
+        self.own.subtitles = subtitles
+        self.lib.series("tt0903747")
+        episode = {"id": "tt0903747:2:1", "type": "Episode", "seriesId": "tt0903747", "season": 2}
+        self.assertEqual(self.lib.subtitles(episode), [{"url": "u", "lang": "eng"}])
+        self.assertEqual(asked, ["tt0903747:2:1", "tt0903747:1:3"])
+        asked.clear()
+        self.lib.subtitles({"id": "tt0903747:1:1", "type": "Episode", "seriesId": "tt0903747", "season": 1})
+        self.assertEqual(asked, ["tt0903747:1:1"])
 
     def test_without_addon_manifest_falls_back_to_aio(self):
         self.meta._manifest = None

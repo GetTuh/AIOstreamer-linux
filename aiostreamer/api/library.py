@@ -49,6 +49,28 @@ def plain_catalog_id(catalog_id):
     return ADDON_PREFIX_RE.sub("", catalog_id or "")
 
 
+def meta_year(meta):
+    match = re.search(r"\d{4}", str(meta.get("releaseInfo") or meta.get("year") or meta.get("released") or ""))
+    return match.group(0) if match else ""
+
+
+def same_title_meta(a, b):
+    if title_key(a.get("name")) != title_key(b.get("name")):
+        return False
+    return not meta_year(a) or not meta_year(b) or meta_year(a) == meta_year(b)
+
+
+def distinct(metas):
+    out, ids = [], set()
+    for meta in metas:
+        keys = {meta.get("id"), meta.get("imdb_id"), meta.get("_imdbId")} - {None, ""}
+        if keys & ids or any(same_title_meta(meta, kept) for kept in out):
+            continue
+        ids |= keys
+        out.append(meta)
+    return out
+
+
 def regular(episodes):
     return [e for e in episodes if e.get("season") not in (0, None)] or list(episodes)
 
@@ -224,7 +246,7 @@ class Library:
                 log.info("search in %s failed: %s", catalog["id"], exc)
                 continue
             (found if direct else own).extend(metas)
-        items = self._previews(found)
+        items = self._previews(distinct(found))
         want = "Movie" if kind == "Movie" else "Series"
         seen = set()
         for meta in own:
@@ -358,11 +380,23 @@ class Library:
         extra = {"filename": hints.get("filename"), "videoSize": hints.get("videoSize"), "videoHash": hints.get("videoHash")}
         try:
             found = self.client.subtitles(stremio_kind(item), video_id(item), extra, fresh)
+            absolute = None if found else self._absolute_id(item)
+            if absolute:
+                found = self.client.subtitles(stremio_kind(item), absolute, extra, fresh)
         except Exception as exc:
             log.info("subtitles: %s", exc)
             found = []
         found += [s for s in (stream or {}).get("subtitles") or [] if s.get("url")]
         return found
+
+    def _absolute_id(self, item):
+        match = TT_EPISODE_RE.match(item.get("id") or "")
+        if not match or int(match.group(2)) < 2:
+            return None
+        _show, episodes = self.series(match.group(1), stremio_kind(item))
+        ordered = regular(episodes)
+        index = next((i for i, e in enumerate(ordered) if e["id"] == item["id"]), -1)
+        return "%s:1:%d" % (match.group(1), index + 1) if index >= 0 else None
 
     def country(self, item):
         if item.get("country"):
