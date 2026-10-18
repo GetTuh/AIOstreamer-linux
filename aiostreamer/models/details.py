@@ -286,6 +286,13 @@ class DetailsModel(QObject):
         stream = find(self._sources, self._selected)
         return short_label(stream) if stream else ""
 
+    @Slot(str, result=bool)
+    def follows(self, item_id):
+        series_id = self._get("seriesId", "")
+        if not item_id or item_id == self._id or self._get("type", "") != "Episode" or not series_id:
+            return False
+        return services.library.known(item_id).get("seriesId") == series_id
+
     @Slot(str)
     def selectSource(self, source_id):
         stream = find(self._sources, source_id)

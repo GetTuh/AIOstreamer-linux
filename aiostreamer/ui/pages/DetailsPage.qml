@@ -67,6 +67,14 @@ FocusScope {
     }
 
     Connections {
+        target: app.playback
+        function onPlaybackEnded(endedId, finished) {
+            if (details.follows(endedId))
+                page.itemId = endedId
+        }
+    }
+
+    Connections {
         target: details
         function onChanged() {
             if (!details.loaded)

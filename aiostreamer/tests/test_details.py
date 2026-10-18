@@ -127,5 +127,29 @@ class DetailsPlayTest(unittest.TestCase):
         self.assertEqual(self.played, [])
 
 
+class FollowTest(unittest.TestCase):
+    def tearDown(self):
+        services.runner = services.library = services.settings = None
+
+    def test_follows_only_other_episodes_of_same_show(self):
+        app()
+
+        class Library(FakeLibrary):
+            def known(self, item_id):
+                return {"tt9:1:2": {"type": "Episode", "seriesId": "tmdb:9"}, "tt8:1:1": {"type": "Episode", "seriesId": "tmdb:8"}}.get(item_id, {})
+
+        services.library = Library()
+        services.settings = FakeSettings()
+        model = DetailsModel()
+        model._id = "tt9:1:1"
+        model._item = {"id": "tt9:1:1", "type": "Episode", "seriesId": "tmdb:9"}
+        self.assertTrue(model.follows("tt9:1:2"))
+        self.assertFalse(model.follows("tt9:1:1"))
+        self.assertFalse(model.follows("tt8:1:1"))
+        self.assertFalse(model.follows(""))
+        model._item = {"id": "movie", "type": "Movie"}
+        self.assertFalse(model.follows("tt9:1:2"))
+
+
 if __name__ == "__main__":
     unittest.main()
