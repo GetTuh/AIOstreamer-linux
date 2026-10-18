@@ -115,9 +115,11 @@ class WatchStateTest(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, manifest=None):
         self.meta_calls = 0
         self.pages = {}
+        self.cache = None
+        self._manifest = manifest
 
     def meta(self, kind, item_id, fresh=False):
         self.meta_calls += 1
@@ -129,11 +131,19 @@ class FakeClient:
         return None
 
     def manifest(self):
-        return {"catalogs": [
+        if self._manifest is not None:
+            return self._manifest
+        return {"resources": [{"name": "meta", "types": ["movie", "series"], "idPrefixes": ["tt"]}], "catalogs": [
             {"type": "movie", "id": "top", "name": "Popular", "extra": [{"name": "search"}, {"name": "skip"}]},
             {"type": "series", "id": "top", "name": "Popular", "extra": [{"name": "search"}]},
             {"type": "series", "id": "cal", "name": "Calendar", "extra": [{"name": "calendarVideosIds", "isRequired": True}]},
         ]}
+
+    def peek_manifest(self):
+        return self.manifest()
+
+    def peek_catalog(self, kind, catalog_id, extra=None):
+        return None
 
     def catalog(self, kind, catalog_id, extra=None):
         extra = extra or {}
@@ -144,9 +154,71 @@ class FakeClient:
 
 
 class FakeSession:
-    def __init__(self):
-        self.client = FakeClient()
+    def __init__(self, client=None):
+        self.client = client or FakeClient()
         self.history = history()
+
+
+LIBRARY_ONLY = {
+    "types": ["movie", "series", "library"],
+    "resources": [
+        {"name": "stream", "types": ["movie", "series", "library"], "idPrefixes": ["tt", "aiostreams::library"]},
+        {"name": "catalog", "types": ["library"]},
+        {"name": "meta", "types": ["library"], "idPrefixes": ["aiostreams::library"]},
+    ],
+    "catalogs": [{"type": "library", "id": "lib", "name": "Library", "extra": [{"name": "search"}, {"name": "skip"}]}],
+}
+
+
+class FallbackTest(unittest.TestCase):
+    def setUp(self):
+        self.own = FakeClient(LIBRARY_ONLY)
+        self.cinemeta = FakeClient()
+        self.lib = Library(FakeSession(self.own), lambda cache: self.cinemeta)
+
+    def test_cinemeta_fills_missing_catalogs(self):
+        rows = [(c["type"], c["id"]) for c in self.lib.home_catalogs()]
+        self.assertEqual(rows, [("movie", "top"), ("series", "top"), ("library", "lib")])
+        self.assertEqual(self.lib.catalog("movie", "top", None, 0, 10)[0][0]["id"], "tt0")
+
+    def test_cinemeta_serves_tt_meta(self):
+        show, episodes = self.lib.series(SHOW["id"])
+        self.assertEqual((self.own.meta_calls, self.cinemeta.meta_calls), (0, 1))
+        self.assertEqual(len(episodes), 5)
+        self.lib.item("aiostreams::library.x")
+        self.assertEqual((self.own.meta_calls, self.cinemeta.meta_calls), (1, 1))
+
+    def test_search_includes_library(self):
+        found = [i["id"] for i in self.lib.search("naruto", "Series")]
+        self.assertEqual(found, ["series-naruto", "library-naruto"])
+
+    def test_no_fallback_when_covered(self):
+        lib = Library(FakeSession(), lambda cache: self.fail("fallback used"))
+        self.assertEqual(len(lib.home_catalogs()), 2)
+        lib.series(SHOW["id"])
+
+
+class DefaultVideoTest(unittest.TestCase):
+    def test_library_movie_plays_default_video(self):
+        meta = {"id": "aiostreams::library.m", "type": "library", "name": "Movie",
+                "videos": [{"id": "aiostreams::library.m:0", "season": 0, "episode": 0}],
+                "behaviorHints": {"defaultVideoId": "aiostreams::library.m:0"}}
+        item = m.from_meta(meta)
+        self.assertEqual((item["type"], item["videoId"]), ("Movie", "aiostreams::library.m:0"))
+        calls = []
+
+        class Client:
+            def streams(self, kind, video_id, fresh=False):
+                calls.append((kind, video_id))
+                return []
+
+        Library(type("S", (), {"client": Client(), "history": None})()).streams(item)
+        self.assertEqual(calls, [("library", "aiostreams::library.m:0")])
+        series = dict(meta, behaviorHints={}, videos=[{"id": "s:0", "season": 1, "episode": 1}])
+        self.assertEqual(m.from_meta(series)["type"], "Series")
+        self.assertNotIn("videoId", m.from_meta(series))
+        self.assertTrue(m.direct_type("anime"))
+        self.assertFalse(m.direct_type("library"))
 
 
 class LibraryTest(unittest.TestCase):

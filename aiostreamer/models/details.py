@@ -65,7 +65,8 @@ class DetailsModel(QObject):
         self._pending_play = None
         self._series_played = False
         info = services.library.known(value) if value else {}
-        self._sources_loading = bool(value) and info.get("type") in ("Movie", "Episode")
+        self._sources_loading = bool(value) and (info.get("type") == "Episode" or (
+            info.get("type") == "Movie" and m.direct_type(info.get("stremioType") or "movie")))
         self.changed.emit()
         self.reload()
         if self._sources_loading:

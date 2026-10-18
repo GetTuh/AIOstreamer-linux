@@ -7,10 +7,10 @@ RUNTIME_RE = re.compile(r"(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:ute
 YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
-def kind_for(stremio_type, videos=None):
+def kind_for(stremio_type, videos=None, default_video=""):
     if stremio_type in SERIES_TYPES:
         return "Series"
-    if stremio_type == "movie":
+    if stremio_type == "movie" or default_video:
         return "Movie"
     if videos and any(v.get("season") is not None for v in videos):
         return "Series"
@@ -94,12 +94,21 @@ def _rating(meta):
         return ""
 
 
+def default_video(meta):
+    return str((meta.get("behaviorHints") or {}).get("defaultVideoId") or "")
+
+
+def direct_type(stremio_type):
+    return stremio_type in ("movie",) + SERIES_TYPES
+
+
 def from_meta(meta):
     stremio_type = meta.get("type") or "movie"
     videos = meta.get("videos") or []
-    return {
+    video = default_video(meta)
+    item = {
         "id": meta.get("id", ""),
-        "type": kind_for(stremio_type, videos),
+        "type": kind_for(stremio_type, videos, video),
         "stremioType": stremio_type,
         "name": meta.get("name") or "",
         "poster": meta.get("poster") or "",
@@ -114,6 +123,9 @@ def from_meta(meta):
         "released": meta.get("released") or "",
         "trailers": trailer_ids(meta),
     }
+    if video and video != item["id"]:
+        item["videoId"] = video
+    return item
 
 
 def episode_number(video):

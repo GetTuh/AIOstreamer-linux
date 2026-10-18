@@ -14,6 +14,7 @@ FocusScope {
 
     signal openItem(var entry)
     signal openSources(var model)
+    signal showSeries(string seriesId)
 
     property real chrome: trailerControls.open ? 0 : 1
     Behavior on chrome { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
@@ -30,6 +31,14 @@ FocusScope {
         itemId: page.itemId
         onUserDataChanged: (changedId) => app.notifyChanged(changedId)
         onPlayRequested: (seconds, sourceId) => app.playSource(page.itemId, seconds, sourceId)
+    }
+
+    Connections {
+        target: details
+        function onChanged() {
+            if (details.itemType === "Series")
+                page.showSeries(page.itemId)
+        }
     }
 
     Component.onCompleted: page.forceActiveFocus()

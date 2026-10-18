@@ -10,7 +10,7 @@ import requests
 
 from aiostreamer.tests.helpers import FakeSettings
 from aiostreamer.api import session as session_module
-from aiostreamer.api.aio import AioClient, AioError, USER_AGENT, manifest_uuid, normalize_manifest_url, resolve_manifest
+from aiostreamer.api.aio import AioClient, AioError, USER_AGENT, manifest_uuid, normalize_manifest_url, resolve_manifest, supports
 from aiostreamer.api.cache import JsonCache
 from aiostreamer.api.session import LoginError, Session, account_key, display_name
 
@@ -66,8 +66,21 @@ class ManifestUrlTest(unittest.TestCase):
         self.assertEqual(normalize_manifest_url(" stremio://aio.example/stremio/u/p/manifest.json "), "https://aio.example/stremio/u/p/manifest.json")
         self.assertEqual(normalize_manifest_url("aio.example/stremio/u/p/"), "https://aio.example/stremio/u/p/manifest.json")
         self.assertEqual(normalize_manifest_url("http://a/stremio/u/p/manifest.json?variant=2"), "http://a/stremio/u/p/manifest.json?variant=2")
+        self.assertEqual(normalize_manifest_url("https://v3-cinemeta.strem.io/manifest.json"), "https://v3-cinemeta.strem.io/manifest.json")
         with self.assertRaises(AioError):
             normalize_manifest_url("https://")
+        with self.assertRaises(AioError):
+            normalize_manifest_url("https://aio.example")
+
+    def test_supports_and_prefix(self):
+        manifest = {"types": ["movie"], "idPrefixes": ["tt"], "resources": [
+            "catalog", {"name": "meta", "types": ["library"], "idPrefixes": ["aiostreams::library"]}]}
+        self.assertTrue(supports(manifest, "catalog", "movie", "tt1"))
+        self.assertFalse(supports(manifest, "catalog", "movie", "kitsu:1"))
+        self.assertTrue(supports(manifest, "meta", "library", "aiostreams::library.x"))
+        self.assertFalse(supports(manifest, "meta", "movie", "tt1"))
+        client = AioClient("https://c.example/manifest.json", None, prefix="cinemeta:")
+        self.assertEqual(client.key(client.url("meta", "movie", "tt1")), "cinemeta:/meta/movie/tt1.json")
 
     def test_uuid_and_names(self):
         self.assertEqual(manifest_uuid(MANIFEST), "0f1e2d3c-1111-2222-3333-444455556666")

@@ -140,6 +140,10 @@ ApplicationWindow {
         DetailsPage {
             onOpenItem: (entry) => window.openItem(entry)
             onOpenSources: (model) => stack.push(sourcesComponent, { details: model })
+            onShowSeries: (seriesId) => {
+                if (stack.currentItem && stack.currentItem.itemId === seriesId)
+                    stack.replace(stack.currentItem, showComponent, { itemId: seriesId })
+            }
         }
     }
 

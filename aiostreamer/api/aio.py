@@ -22,6 +22,7 @@ TTL = {
 }
 ERROR_PREFIX = "aiostreamserror"
 PLAYABLE_TYPES = ("http", "debrid", "usenet", "live", "")
+CINEMETA_URL = "https://v3-cinemeta.strem.io/manifest.json"
 
 
 class AioError(Exception):
@@ -38,7 +39,7 @@ def normalize_manifest_url(text):
     path = parts.path.rstrip("/")
     if path.endswith("/manifest.json"):
         path = path[:-len("/manifest.json")]
-    if not parts.netloc or not path:
+    if not parts.netloc or not (path or parts.path.endswith("/manifest.json")):
         raise AioError("Not a manifest URL")
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path + "/manifest.json", parts.query, ""))
 
@@ -88,6 +89,21 @@ def resolve_manifest(instance, user, password, http=None):
     return "%s/stremio/%s/%s/manifest.json" % (origin, uuid, encrypted)
 
 
+def supports(manifest, resource, kind, item_id=None):
+    for entry in (manifest or {}).get("resources") or []:
+        if isinstance(entry, str):
+            entry = {"name": entry}
+        if entry.get("name") != resource:
+            continue
+        types = entry.get("types") or manifest.get("types") or []
+        prefixes = entry.get("idPrefixes") if "idPrefixes" in entry else manifest.get("idPrefixes")
+        if kind not in types:
+            continue
+        if item_id is None or not prefixes or any(str(item_id).startswith(p) for p in prefixes):
+            return True
+    return False
+
+
 def is_playable(stream):
     if not stream.get("url"):
         return False
@@ -96,7 +112,9 @@ def is_playable(stream):
 
 
 class AioClient:
-    def __init__(self, manifest_url, cache, http=None, parallel=PARALLEL):
+    def __init__(self, manifest_url, cache, http=None, parallel=PARALLEL, label="AIOStreams", prefix=""):
+        self.label = label
+        self.prefix = prefix
         self.manifest_url = normalize_manifest_url(manifest_url)
         parts = urllib.parse.urlsplit(self.manifest_url)
         self.base = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path[:-len("/manifest.json")], "", ""))
@@ -130,18 +148,18 @@ class AioClient:
             try:
                 resp = self._session().get(url, timeout=TIMEOUT, headers={"User-Agent": USER_AGENT})
             except requests.RequestException as exc:
-                raise AioError("AIOStreams not reachable: %s" % exc.__class__.__name__)
+                raise AioError("%s not reachable: %s" % (self.label, exc.__class__.__name__))
         if resp.status_code == 429:
-            raise AioError("AIOStreams is rate limiting requests, try again shortly")
+            raise AioError("%s is rate limiting requests, try again shortly" % self.label)
         if resp.status_code >= 400:
-            raise AioError("AIOStreams answered %d" % resp.status_code)
+            raise AioError("%s answered %d" % (self.label, resp.status_code))
         try:
             return resp.json()
         except ValueError:
-            raise AioError("AIOStreams sent an invalid response")
+            raise AioError("%s sent an invalid response" % self.label)
 
     def key(self, url):
-        return url[len(self.base):] if url.startswith(self.base) else url
+        return self.prefix + (url[len(self.base):] if url.startswith(self.base) else url)
 
     def _peek(self, url):
         return self.cache.peek(self.key(url))
@@ -155,7 +173,7 @@ class AioClient:
         data = self._cached(self.url("manifest"), TTL["manifest"], fresh)
         if not isinstance(data, dict) or "resources" not in data:
             self.cache.drop(self.key(self.url("manifest")))
-            raise AioError("Not an AIOStreams manifest")
+            raise AioError("Not a %s manifest" % self.label)
         return data
 
     def peek_manifest(self):

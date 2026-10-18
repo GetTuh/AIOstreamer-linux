@@ -74,7 +74,7 @@ class HomeModel(QAbstractListModel):
             cached = None
         if cached:
             try:
-                self._on_catalogs(lib.home_catalogs())
+                self._on_catalogs(lib.home_catalogs(cached=True))
             except Exception:
                 pass
         self._runner.run(lib.home_catalogs, self._on_catalogs)
