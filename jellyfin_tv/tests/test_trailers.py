@@ -48,8 +48,8 @@ class FakeLibrary:
 
     def trailers(self, item_id):
         self.calls.append(item_id)
-        local, remote = self.data.get(item_id, ([], []))
-        return {"local": local, "remote": remote, "title": "", "year": None}
+        _local, remote = self.data.get(item_id, ([], []))
+        return {"remote": remote, "title": "", "year": None}
 
 
 class Clock:
@@ -112,21 +112,10 @@ class ResolverTest(unittest.TestCase):
 
 
 class LibraryTrailersTest(unittest.TestCase):
-    def test_reads_local_and_remote(self):
+    def test_trailers_from_meta(self):
         lib = Library(None)
-        responses = {
-            "Items/m": {"LocalTrailerCount": 1, "RemoteTrailers": [{"Url": YT}, {"Name": "no url"}]},
-            "Items/m/LocalTrailers": [{"Id": "t1"}],
-        }
-        lib._get = lambda path, params=None: responses[path]
-        self.assertEqual(lib.trailers("m"), {"local": ["t1"], "remote": [YT], "title": "", "year": None})
-
-    def test_skips_local_lookup_without_count(self):
-        lib = Library(None)
-        seen = []
-        lib._get = lambda path, params=None: seen.append(path) or {"RemoteTrailers": [], "Name": "Avatar", "ProductionYear": 2009}
-        self.assertEqual(lib.trailers("m"), {"local": [], "remote": [], "title": "Avatar", "year": 2009})
-        self.assertEqual(seen, ["Items/m"])
+        lib.peek_item = lambda item_id: {"id": item_id, "name": "Avatar", "year": "2009", "trailers": ["d9MyW72ELq0"]}
+        self.assertEqual(lib.trailers("tt1"), {"remote": ["https://www.youtube.com/watch?v=d9MyW72ELq0"], "title": "Avatar", "year": "2009"})
 
 
 class TrailerPreviewTest(unittest.TestCase):
@@ -136,7 +125,7 @@ class TrailerPreviewTest(unittest.TestCase):
         self.settings = FakeSettings()
         self.resolved = []
         resolver = TrailerResolver(lambda url: self.resolved.append(url) or DASH)
-        self.library = FakeLibrary({"movie": ([], [YT]), "show": ([], ["bad", YT]), "local": (["t1"], [YT])})
+        self.library = FakeLibrary({"movie": ([], [YT]), "show": ([], ["bad", YT]), })
         self.preview = TrailerPreview(self.runner, self.library, self.settings, resolver=resolver)
         self.emitted = []
         self.preview.changed.connect(lambda: self.emitted.append(self.preview.videoUrl))
@@ -163,16 +152,6 @@ class TrailerPreviewTest(unittest.TestCase):
         self.elapse()
         self.assertFalse(self.preview.muted)
 
-    def test_local_trailer_wins_and_carries_its_own_audio(self):
-        self.settings.set("trailer_previews", "sound")
-        self.preview.request("local", "Movie")
-        self.elapse()
-        self.assertIn("Videos/t1/stream", self.preview.videoUrl)
-        self.assertIn("ApiKey=TOKEN", self.preview.videoUrl)
-        self.assertTrue(self.preview.muxed)
-        self.assertEqual(self.preview.audioUrl, "")
-        self.assertEqual(self.resolved, [])
-
     def test_falls_through_failing_remote_urls(self):
         def extract(url):
             self.resolved.append(url)
@@ -186,14 +165,14 @@ class TrailerPreviewTest(unittest.TestCase):
         self.assertEqual(self.preview.videoUrl, "https://v/video")
 
     def test_searches_youtube_when_server_lists_no_trailer(self):
-        self.library.trailers = lambda item_id: {"local": [], "remote": [], "title": "Avatar", "year": 2009}
+        self.library.trailers = lambda item_id: {"remote": [], "title": "Avatar", "year": 2009}
         self.preview.request("avatar", "Movie")
         self.elapse()
         self.assertEqual(self.resolved, ["ytsearch1:Avatar 2009 official trailer"])
         self.assertEqual(self.preview.videoUrl, "https://v/video")
 
     def test_search_is_last_resort_after_listed_trailers(self):
-        self.library.trailers = lambda item_id: {"local": [], "remote": [YT], "title": "Avatar", "year": 2009}
+        self.library.trailers = lambda item_id: {"remote": [YT], "title": "Avatar", "year": 2009}
         self.preview.request("avatar", "Movie")
         self.elapse()
         self.assertEqual(self.resolved, [YT])

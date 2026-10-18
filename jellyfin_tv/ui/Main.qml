@@ -20,10 +20,6 @@ ApplicationWindow {
     Component.onCompleted: app.setAccent(accent)
 
     function goBack() {
-        if (app.quickConnectCode.length > 0) {
-            app.cancelQuickConnect()
-            return
-        }
         if (app.playback.busy)
             return
         if (stack.depth > 1)
@@ -35,12 +31,14 @@ ApplicationWindow {
     function openItem(entry) {
         if (!entry || !entry.itemId)
             return
-        var folderTypes = ["CollectionFolder", "UserView", "Folder", "BoxSet", "Playlist", "ManualPlaylistsFolder"]
-        if (folderTypes.indexOf(entry.itemType) >= 0) {
-            var page = stack.push(libraryComponent, {
-                parentId: entry.itemId,
-                collectionType: entry.collectionType || "",
-                title: entry.name
+        if (entry.itemType === "Catalog") {
+            var c = entry.catalog || {}
+            stack.push(libraryComponent, {
+                catalogType: c.type || "",
+                catalogId: c.id || "",
+                genres: c.genres || [],
+                genreRequired: !!c.genreRequired,
+                title: c.title || entry.name
             })
             return
         }
@@ -57,10 +55,6 @@ ApplicationWindow {
 
     function openSettings() {
         stack.push(settingsComponent)
-    }
-
-    function openSyncPlay() {
-        stack.push(syncPlayComponent)
     }
 
     function showRoot() {
@@ -131,7 +125,6 @@ ApplicationWindow {
             onOpenItem: (entry) => window.openItem(entry)
             onOpenSearch: window.openSearch()
             onOpenSettings: window.openSettings()
-            onOpenSyncPlay: window.openSyncPlay()
         }
     }
 
@@ -155,11 +148,6 @@ ApplicationWindow {
         ShowPage {
             onOpenItem: (entry) => window.openItem(entry)
         }
-    }
-
-    Component {
-        id: syncPlayComponent
-        SyncPlayPage {}
     }
 
     Component {

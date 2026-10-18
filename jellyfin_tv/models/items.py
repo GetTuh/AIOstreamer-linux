@@ -4,78 +4,46 @@ import unicodedata
 from PySide6.QtCore import Property, QAbstractListModel, QByteArray, QModelIndex, Qt, QTimer, Signal, Slot
 
 from jellyfin_tv.api.images import image_source
+from jellyfin_tv.api.meta import episode_label, runtime_text
 from jellyfin_tv.models.services import services
 
-TICKS = 10_000_000
-
 ROLE_NAMES = (
-    "itemId", "name", "subtitle", "itemType", "collectionType", "image", "progress",
+    "itemId", "name", "subtitle", "itemType", "stremioType", "seriesId", "image", "progress",
     "played", "unplayedCount", "isFolder", "overview", "favorite",
 )
 ROLES = {Qt.UserRole + i: name for i, name in enumerate(ROLE_NAMES)}
 
-SORTS = (
-    ("", "Default", None),
-    ("SortName", "Name", "Ascending"),
-    ("DateCreated,SortName", "Date added", "Descending"),
-    ("PremiereDate,SortName", "Release date", "Descending"),
-    ("CommunityRating,SortName", "Rating", "Descending"),
-)
-
-
-def episode_label(item):
-    season = item.get("ParentIndexNumber")
-    number = item.get("IndexNumber")
-    if season is None and number is None:
-        return ""
-    if season is None:
-        return "E%d" % number
-    if number is None:
-        return "S%d" % season
-    return "S%d:E%d" % (season, number)
-
-
-def runtime_text(ticks):
-    minutes = int((ticks or 0) / TICKS / 60)
-    if not minutes:
-        return ""
-    hours, mins = divmod(minutes, 60)
-    return "%dh %dm" % (hours, mins) if hours else "%dm" % mins
-
 
 def subtitle_for(item):
-    kind = item.get("Type")
+    kind = item.get("type")
     if kind == "Episode":
-        label = episode_label(item)
-        return " · ".join(p for p in (label, item.get("Name")) if p)
-    if kind == "Series":
-        start = item.get("ProductionYear")
-        end = (item.get("EndDate") or "")[:4]
-        if start and item.get("Status") == "Continuing":
-            return "%s –" % start
-        if start and end and str(start) != end:
-            return "%s – %s" % (start, end)
-        return str(start or "")
-    if item.get("ProductionYear"):
-        return str(item["ProductionYear"])
-    return ""
+        return " · ".join(p for p in (episode_label(item), item.get("name")) if p)
+    if kind == "Catalog":
+        return item.get("subtitle", "")
+    return item.get("year") or ""
 
 
 def title_for(item):
-    if item.get("Type") == "Episode" and item.get("SeriesName"):
-        return item["SeriesName"]
-    return item.get("Name", "")
+    if item.get("type") == "Episode" and item.get("seriesName"):
+        return item["seriesName"]
+    return item.get("name", "")
+
+
+def history():
+    library = services.library
+    return library.history if library is not None else None
 
 
 def progress_for(item):
-    data = item.get("UserData") or {}
-    if data.get("PlayedPercentage") is not None and not data.get("Played"):
-        return max(0.0, min(1.0, data["PlayedPercentage"] / 100.0))
-    pos = data.get("PlaybackPositionTicks") or 0
-    total = item.get("RunTimeTicks") or 0
-    if pos and total:
-        return max(0.0, min(1.0, pos / total))
-    return 0.0
+    state = history()
+    return state.fraction(item.get("id", "")) if state is not None else 0.0
+
+
+def played_for(item):
+    if "played" in item:
+        return bool(item["played"])
+    state = history()
+    return bool(state is not None and state.watched(item.get("id", "")))
 
 
 def normalize_title(text):
@@ -106,10 +74,11 @@ class ItemListModel(QAbstractListModel):
     loadingChanged = Signal()
     kindChanged = Signal()
 
-    def __init__(self, runner, fetch, image_kind="poster", page_size=0, title="", parent=None, context="default"):
+    def __init__(self, runner, fetch, image_kind="poster", page_size=0, title="", parent=None, context="default", peek=None):
         super().__init__(parent)
         self._runner = runner
         self._fetch = fetch
+        self._peek = peek
         self._kind = image_kind
         self._page = page_size
         self._title = title
@@ -132,40 +101,42 @@ class ItemListModel(QAbstractListModel):
         item = self._items[index.row()]
         name = ROLES.get(role)
         if name is None:
-            return item.get("Name") if role == Qt.DisplayRole else None
+            return item.get("name") if role == Qt.DisplayRole else None
         return self._value(item, name)
 
     def _value(self, item, name):
         if name == "itemId":
-            return item.get("Id")
+            return item.get("id")
         if name == "name":
             if self._context == "episodes":
-                number = item.get("IndexNumber")
-                return "%s. %s" % (number, item.get("Name", "")) if number is not None else item.get("Name", "")
+                number = item.get("episode")
+                return "%s. %s" % (number, item.get("name", "")) if number is not None else item.get("name", "")
             return title_for(item)
         if name == "subtitle":
             if self._context == "episodes":
-                return runtime_text(item.get("RunTimeTicks"))
+                return runtime_text(item.get("runtime"))
             return subtitle_for(item)
         if name == "itemType":
-            return item.get("Type", "")
-        if name == "collectionType":
-            return item.get("CollectionType", "")
+            return item.get("type", "")
+        if name == "stremioType":
+            return item.get("stremioType", "")
+        if name == "seriesId":
+            return item.get("seriesId", "")
         if name == "image":
             return image_source(item, self._kind)
         if name == "progress":
             return progress_for(item)
         if name == "overview":
-            return item.get("Overview") or ""
-        data = item.get("UserData") or {}
+            return item.get("overview") or ""
         if name == "played":
-            return bool(data.get("Played"))
+            return played_for(item)
         if name == "unplayedCount":
-            return int(data.get("UnplayedItemCount") or 0)
+            return int(item.get("unplayed") or 0)
         if name == "favorite":
-            return bool(data.get("IsFavorite"))
+            state = history()
+            return bool(state is not None and state.favorite(item.get("id", "")))
         if name == "isFolder":
-            return bool(item.get("IsFolder"))
+            return item.get("type") == "Catalog"
         return None
 
     @Property(str, constant=True)
@@ -179,8 +150,7 @@ class ItemListModel(QAbstractListModel):
         if value and value != self._kind:
             self._kind = value
             self.kindChanged.emit()
-            if self._items:
-                self.dataChanged.emit(self.index(0), self.index(len(self._items) - 1))
+            self.refreshUserData()
 
     imageKind = Property(str, _get_kind, _set_kind, notify=kindChanged)
 
@@ -203,7 +173,7 @@ class ItemListModel(QAbstractListModel):
     def _apply(self, items, total):
         items = list(items)
         same = len(items) == len(self._items) and all(
-            a.get("Id") == b.get("Id") for a, b in zip(items, self._items))
+            a.get("id") == b.get("id") for a, b in zip(items, self._items))
         if same and items:
             self._items = items
             self.dataChanged.emit(self.index(0), self.index(len(items) - 1))
@@ -213,10 +183,23 @@ class ItemListModel(QAbstractListModel):
             self.endResetModel()
         self._total = total if total else len(self._items)
 
+    def _peek_cached(self):
+        if self._peek is None or self._items:
+            return
+        try:
+            cached = self._peek()
+        except Exception:
+            cached = None
+        if cached:
+            self._apply(*cached)
+            self._loaded = True
+            self.countChanged.emit()
+
     @Slot()
     def reload(self):
         self._generation += 1
         generation = self._generation
+        self._peek_cached()
         self._set_loading(True)
         limit = self._page or None
         if self._page and len(self._items) > self._page:
@@ -236,6 +219,11 @@ class ItemListModel(QAbstractListModel):
                 self._set_loading(False)
 
         self._runner.run(lambda: self._fetch(0, limit), done, failed)
+
+    @Slot()
+    def refreshUserData(self):
+        if self._items:
+            self.dataChanged.emit(self.index(0), self.index(len(self._items) - 1))
 
     @Slot()
     def clear(self):
@@ -262,7 +250,8 @@ class ItemListModel(QAbstractListModel):
             if generation != self._generation:
                 return
             items, total = result
-            items = list(items)
+            known = {i.get("id") for i in self._items}
+            items = [i for i in items if i.get("id") not in known]
             if items:
                 self.beginInsertRows(QModelIndex(), start, start + len(items) - 1)
                 self._items.extend(items)
@@ -283,12 +272,14 @@ class ItemListModel(QAbstractListModel):
         if row < 0 or row >= len(self._items):
             return {}
         item = self._items[row]
-        return {name: self._value(item, name) for name in ROLE_NAMES}
+        out = {name: self._value(item, name) for name in ROLE_NAMES}
+        out["catalog"] = item.get("catalog") or {}
+        return out
 
     @Slot(str, result=int)
     def indexOf(self, item_id):
         for row, item in enumerate(self._items):
-            if item.get("Id") == item_id:
+            if item.get("id") == item_id:
                 return row
         return -1
 
@@ -301,82 +292,78 @@ class ItemListModel(QAbstractListModel):
 
 
 class LibraryModel(ItemListModel):
-    PAGE_SIZE = 60
+    PAGE_SIZE = 50
 
     paramsChanged = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(services.runner, self._fetch_page, "poster", self.PAGE_SIZE, "", parent)
-        self._parent_id = ""
-        self._collection_type = ""
-        self._sort = 0
+        super().__init__(services.runner, self._fetch_page, "poster", self.PAGE_SIZE, "", parent, peek=self._peek_page)
+        self._type = ""
+        self._catalog = ""
+        self._genres = []
+        self._required = False
+        self._genre = ""
+
+    def _extra(self):
+        return {"genre": self._genre} if self._genre else None
 
     def _fetch_page(self, start, limit):
-        sort_by, _, order = SORTS[self._sort]
-        return services.library.items(self._parent_id, self._collection_type, start, limit, sort_by or None, order)
+        return services.library.catalog(self._type, self._catalog, self._extra(), start, limit)
 
-    def _get_parent(self):
-        return self._parent_id
+    def _peek_page(self):
+        items = services.library.peek_catalog(self._type, self._catalog, self._extra())
+        return (items, len(items) + 1) if items else None
 
-    def _set_parent(self, value):
-        if value != self._parent_id:
-            self._parent_id = value
+    def _setter(attr):
+        def setter(self, value):
+            if value != getattr(self, attr):
+                setattr(self, attr, value)
+                self.paramsChanged.emit()
+        return setter
+
+    def _set_genres(self, value):
+        value = list(value or [])
+        if value != self._genres:
+            self._genres = value
+            if self._required and not self._genre and value:
+                self._genre = value[0]
             self.paramsChanged.emit()
 
-    def _get_collection(self):
-        return self._collection_type
-
-    def _set_collection(self, value):
-        if value != self._collection_type:
-            self._collection_type = value
+    def _set_required(self, value):
+        if bool(value) != self._required:
+            self._required = bool(value)
+            if self._required and not self._genre and self._genres:
+                self._genre = self._genres[0]
             self.paramsChanged.emit()
 
-    def _get_sort(self):
-        return self._sort
-
-    def _set_sort(self, value):
-        value = int(value) % len(SORTS)
-        if value != self._sort:
-            self._sort = value
+    def _set_genre(self, value):
+        if value != self._genre:
+            self._genre = value
             self.paramsChanged.emit()
             self.clear()
             self.reload()
 
-    parentId = Property(str, _get_parent, _set_parent, notify=paramsChanged)
-    collectionType = Property(str, _get_collection, _set_collection, notify=paramsChanged)
-    sortIndex = Property(int, _get_sort, _set_sort, notify=paramsChanged)
+    catalogType = Property(str, lambda self: self._type, _setter("_type"), notify=paramsChanged)
+    catalogId = Property(str, lambda self: self._catalog, _setter("_catalog"), notify=paramsChanged)
+    genres = Property("QVariantList", lambda self: self._genres, _set_genres, notify=paramsChanged)
+    genreRequired = Property(bool, lambda self: self._required, _set_required, notify=paramsChanged)
+    genre = Property(str, lambda self: self._genre, _set_genre, notify=paramsChanged)
+
+    @Slot(int)
+    def stepGenre(self, step):
+        choices = list(self._genres) if self._required else [""] + list(self._genres)
+        if not choices:
+            return
+        index = choices.index(self._genre) if self._genre in choices else 0
+        self._set_genre(choices[(index + step) % len(choices)])
 
     @Property(str, notify=paramsChanged)
-    def sortName(self):
-        return SORTS[self._sort][1]
-
-
-class SimilarModel(ItemListModel):
-    paramsChanged = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(services.runner, self._fetch_similar, "thumb", 0, "More like this", parent)
-        self._item_id = ""
-
-    def _fetch_similar(self, start, limit):
-        items = services.library.similar(self._item_id)
-        return items, len(items)
-
-    def _get_item(self):
-        return self._item_id
-
-    def _set_item(self, value):
-        if value != self._item_id:
-            self._item_id = value
-            self.paramsChanged.emit()
-            if value:
-                self.reload()
-
-    itemId = Property(str, _get_item, _set_item, notify=paramsChanged)
+    def genreName(self):
+        return self._genre or "All"
 
 
 class SearchModel(ItemListModel):
-    DEBOUNCE_MS = 350
+    DEBOUNCE_MS = 450
     MIN_CHARS = 2
 
     paramsChanged = Signal()
@@ -385,7 +372,7 @@ class SearchModel(ItemListModel):
     def __init__(self, parent=None):
         super().__init__(services.runner, self._fetch_search, "poster", 0, "", parent)
         self._term = ""
-        self._types = "Movie,Series"
+        self._types = "Movie"
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(self.DEBOUNCE_MS)
@@ -393,7 +380,9 @@ class SearchModel(ItemListModel):
         self.countChanged.connect(self.relevanceChanged)
 
     def _fetch_search(self, start, limit):
-        items = services.library.search(self._term, self._types)
+        term = self._term.strip()
+        items = services.library.search(term, self._types)
+        items.sort(key=lambda i: match_score(term, i.get("name", "")), reverse=True)
         return items, len(items)
 
     def _run(self):
@@ -423,7 +412,7 @@ class SearchModel(ItemListModel):
     def relevance(self):
         best = 0.0
         for rank, item in enumerate(self._items[:5]):
-            best = max(best, match_score(self._term, item.get("Name", "")) - rank * 0.05)
+            best = max(best, match_score(self._term, item.get("name", "")) - rank * 0.05)
         return best
 
     term = Property(str, _get_term, _set_term, notify=paramsChanged)

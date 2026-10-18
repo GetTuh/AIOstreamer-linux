@@ -2,29 +2,26 @@ import logging
 
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
-from jellyfin_tv.api import trickplay
-from jellyfin_tv.api.session import same_origin
-from jellyfin_tv.models.items import episode_label
-from jellyfin_tv.models.sources import describe, pick_source, preferred_source_id, sort_sources
+from jellyfin_tv.api.meta import episode_label
+from jellyfin_tv.models.sources import binge_group, describe, find, pick, remember, short_label, stream_id
 from jellyfin_tv.player.mpv_runner import MpvPlayer, build_options
-from jellyfin_tv.player.reporter import PlaybackReporter
-from jellyfin_tv.player.tracks import choose_audio, choose_subtitle, preferred
+from jellyfin_tv.player.tracks import canonical, choose_audio, choose_subtitle, preferred
 
 log = logging.getLogger("jellyfin_tv.playback")
 
-TICKS = 10_000_000
 PROGRESS_INTERVAL_MS = 10_000
 UPNEXT_LEAD = 30
+SUBS_PER_LANGUAGE = 2
 
 
 def media_title(item):
-    if item.get("Type") == "Episode":
-        season = item.get("ParentIndexNumber")
-        number = item.get("IndexNumber")
+    if item.get("type") == "Episode":
+        season = item.get("season")
+        number = item.get("episode")
         label = "S%02dE%02d" % (season, number) if season is not None and number is not None else ""
-        return " - ".join(p for p in (item.get("SeriesName"), label, item.get("Name")) if p)
-    year = item.get("ProductionYear")
-    return "%s (%s)" % (item.get("Name", ""), year) if year else item.get("Name", "")
+        return " - ".join(p for p in (item.get("seriesName"), label, item.get("name")) if p)
+    year = (item.get("year") or "")[:4]
+    return "%s (%s)" % (item.get("name", ""), year) if year else item.get("name", "")
 
 
 def up_next_at(duration, outro, countdown):
@@ -33,6 +30,32 @@ def up_next_at(duration, outro, countdown):
     if outro and 0 < outro < duration - countdown:
         return outro
     return max(duration - max(UPNEXT_LEAD, countdown + 5), 0)
+
+
+def proxy_headers(stream):
+    headers = (((stream.get("behaviorHints") or {}).get("proxyHeaders")) or {}).get("request") or {}
+    return ",".join("%s: %s" % (k, str(v).replace(",", r"\,")) for k, v in headers.items())
+
+
+def pick_subtitles(subs, languages):
+    wanted = [canonical(lang) for lang in languages if canonical(lang)]
+    out, counts, seen = [], {}, set()
+    for sub in subs:
+        lang = canonical(sub.get("lang"))
+        if lang not in wanted or sub["url"] in seen or counts.get(lang, 0) >= SUBS_PER_LANGUAGE:
+            continue
+        seen.add(sub["url"])
+        counts[lang] = counts.get(lang, 0) + 1
+        out.append(sub)
+    return out
+
+
+def wants_external(tracks, sub_langs, mode, audio_lang):
+    if mode == "off" or not sub_langs:
+        return False
+    if mode != "always" and canonical(audio_lang) in sub_langs:
+        return False
+    return not any(t.get("type") == "sub" and canonical(t.get("lang")) in sub_langs for t in tracks)
 
 
 class PlaybackController(QObject):
@@ -62,7 +85,6 @@ class PlaybackController(QObject):
         self.last_item = None
         self._switching = False
         self.theme = {}
-        self.observer = None
         self._timer = QTimer(self)
         self._timer.setInterval(PROGRESS_INTERVAL_MS)
         self._timer.timeout.connect(self._tick)
@@ -90,40 +112,37 @@ class PlaybackController(QObject):
 
     @Slot(str, float)
     @Slot(str, float, str)
-    def play(self, item_id, start_ticks=0.0, source_id="", paused=False):
+    def play(self, item_id, start=0.0, source_id="", paused=False):
         if self._busy or self._active is not None:
             return
         if not MpvPlayer.available():
             self.errorOccurred.emit("mpv is not installed")
             return
         self._set_busy(True)
-        start = max(float(start_ticks or 0) / TICKS, 0.0)
+        start = max(float(start or 0), 0.0)
         self._runner.run(lambda: self._prepare(item_id, start, source_id or None, paused), self._launched, self._failed)
 
-    def _resolve(self, item_id, start, source_id):
-        item = self._library.item(item_id)
-        source_id = source_id or self._settings.get_source(item_id) or None
-        info = self._library.playback_info(item_id, source_id) or {}
-        sources = info.get("MediaSources") or self._library.sources(item_id)
-        source = pick_source(sources, source_id or preferred_source_id(item_id, sources, item.get("OriginalLanguage")), item.get("OriginalLanguage"))
-        if source is None:
-            raise RuntimeError("No playable source")
-        url, method = self._stream_url(item_id, source, info.get("PlaySessionId"))
-        state = {
+    def _resolve(self, item_id, start, source_id, item=None, group=""):
+        item = item or self._library.item(item_id)
+        streams = self._library.streams(item)
+        same_group = next((s for s in streams if group and binge_group(s) == group), None)
+        stream = find(streams, source_id) or same_group or pick(streams, item)
+        if stream is None:
+            raise RuntimeError("No playable versions found")
+        return {
             "item": item,
             "item_id": item_id,
-            "source": source,
-            "sources": sort_sources(sources, item.get("OriginalLanguage") or ""),
-            "url": url,
-            "subs": self._external_subtitles(source),
+            "stream": stream,
+            "streams": streams,
+            "url": stream["url"],
+            "headers": proxy_headers(stream),
             "start": start,
             "position": start,
             "paused": False,
-            "duration": (source.get("RunTimeTicks") or item.get("RunTimeTicks") or 0) / TICKS,
+            "duration": float(item.get("runtime") or 0),
             "completed": False,
             "playing": False,
             "error": False,
-            "reporter": PlaybackReporter(self._session.client, item_id, source.get("Id"), info.get("PlaySessionId"), method),
             "next_item": None,
             "outro": None,
             "upnext": "idle",
@@ -131,7 +150,6 @@ class PlaybackController(QObject):
             "fetching": False,
             "advance": False,
         }
-        return state
 
     def _prepare(self, item_id, start, source_id, paused=False):
         state = self._resolve(item_id, start, source_id)
@@ -149,66 +167,24 @@ class PlaybackController(QObject):
         )
         state["player"] = player
         self._active = state
-        player.start(build_options(self._settings, media_title(item), start, extra={"pause": "yes"} if paused else None,
-                                   original=item.get("OriginalLanguage") or "", theme=self.theme))
+        extra = {"pause": "yes"} if paused else {}
+        if state["headers"]:
+            extra["http-header-fields"] = state["headers"]
+        player.start(build_options(self._settings, media_title(item), start, extra=extra or None, theme=self.theme))
         player.load(state["url"])
         return state
-
-    def _stream_url(self, item_id, source, play_session_id):
-        path = source.get("Path") or ""
-        if source.get("Protocol") == "Http" and path.startswith(("http://", "https://")) and not same_origin(path, self._session.server):
-            return path, "DirectPlay"
-        if source.get("SupportsDirectStream", True) or source.get("SupportsDirectPlay"):
-            return self._session.url(
-                "Videos/%s/stream" % item_id,
-                static="true",
-                MediaSourceId=source.get("Id"),
-                PlaySessionId=play_session_id,
-                DeviceId=self._settings.device_id,
-                ApiKey=self._session.token,
-            ), "DirectPlay"
-        if source.get("TranscodingUrl"):
-            return self._absolute(source["TranscodingUrl"]), "Transcode"
-        raise RuntimeError("Source cannot be streamed")
-
-    def _absolute(self, url):
-        if url.startswith(("http://", "https://")):
-            if same_origin(url, self._session.server) and "apikey=" not in url.lower():
-                url += ("&" if "?" in url else "?") + "ApiKey=" + self._session.token
-            return url
-        url = self._session.server + "/" + url.lstrip("/")
-        if "apikey=" not in url.lower():
-            url += ("&" if "?" in url else "?") + "ApiKey=" + self._session.token
-        return url
-
-    def _external_subtitles(self, source):
-        subs = []
-        for stream in source.get("MediaStreams") or []:
-            if stream.get("Type") != "Subtitle" or not stream.get("IsExternal"):
-                continue
-            url = stream.get("DeliveryUrl")
-            if not url:
-                continue
-            subs.append({
-                "url": self._absolute(url),
-                "title": stream.get("Title") or stream.get("DisplayTitle") or "",
-                "lang": stream.get("Language") or "",
-            })
-        return subs
 
     def _launched(self, state):
         self._active = state
         self.busyChanged.emit()
         self._find_next(state)
-        self._load_segments(state)
 
     def _find_next(self, state):
         item = state["item"]
-        if item.get("Type") != "Episode" or not item.get("SeriesId"):
+        if item.get("type") != "Episode":
             return
-        series_id, item_id = item["SeriesId"], state["item_id"]
         self._runner.run(
-            lambda: self._library.next_episode(series_id, item_id),
+            lambda: self._library.next_episode(item),
             lambda next_item: self._next_found(state, next_item),
             lambda exc: log.info("no next episode: %s", exc))
 
@@ -216,26 +192,11 @@ class PlaybackController(QObject):
         state["next_item"] = next_item
         self._check_up_next(state)
 
-    def _load_segments(self, state):
-        item_id = state["item_id"]
-        self._runner.run(lambda: self._library.segments(item_id), lambda found: self._segments_loaded(state, found), lambda _e: None)
-
-    def _segments_loaded(self, state, segments):
-        state["segments"] = segments
-        outros = [s["start"] for s in segments if s["kind"] == "Outro"]
-        state["outro"] = min(outros) if outros else None
-        self._send_segments(state)
-        self._check_up_next(state)
-
-    def _send_segments(self, state):
-        if state is self._active and state.get("loaded") and state.get("segments") is not None:
-            state["player"].set_segments(state["segments"])
-
     def _countdown(self):
         return int(self._settings.get("upnext_seconds") or 10)
 
     def _check_up_next(self, state):
-        if state is not self._active or not state["next_item"] or not state["playing"] or self.observer:
+        if state is not self._active or not state["next_item"] or not state["playing"]:
             return
         trigger = up_next_at(state["duration"], state["outro"], self._countdown())
         if trigger is None:
@@ -244,8 +205,8 @@ class PlaybackController(QObject):
         if position >= trigger and state["upnext"] == "idle":
             state["upnext"] = "shown"
             nxt = state["next_item"]
-            label = " · ".join(p for p in (episode_label(nxt), nxt.get("Name")) if p)
-            state["player"].show_up_next(nxt.get("SeriesName") or "", label, self._countdown(), bool(self._settings.get("autoplay_next")), self.theme.get("accent", ""))
+            label = " · ".join(p for p in (episode_label(nxt), nxt.get("name")) if p)
+            state["player"].show_up_next(nxt.get("seriesName") or "", label, self._countdown(), bool(self._settings.get("autoplay_next")), self.theme.get("accent", ""))
             self._prefetch_next(state)
         elif position < trigger - 2 and state["upnext"] != "idle":
             if state["upnext"] == "shown":
@@ -253,14 +214,19 @@ class PlaybackController(QObject):
             state["upnext"] = "idle"
             state["advance"] = False
 
+    def _history_start(self, item_id):
+        history = self._session.history
+        return float(history.progress(item_id)[0]) if history is not None else 0.0
+
     def _prefetch_next(self, state):
         if state["next_state"] or state["fetching"] or not state["next_item"]:
             return
         state["fetching"] = True
         nxt = state["next_item"]
-        start = float((nxt.get("UserData") or {}).get("PlaybackPositionTicks") or 0) / TICKS
+        start = self._history_start(nxt["id"])
+        group = binge_group(state["stream"])
         self._runner.run(
-            lambda: self._resolve(nxt["Id"], start, None),
+            lambda: self._resolve(nxt["id"], start, None, nxt, group),
             lambda ready: self._next_ready(state, ready),
             lambda exc: self._next_failed(state, exc))
 
@@ -288,8 +254,8 @@ class PlaybackController(QObject):
         if state is not self._active:
             return
         ready = state["next_state"]
-        self.playbackAdvanced.emit(state["item_id"])
         self._swap(state, ready, True)
+        self.playbackAdvanced.emit(state["item_id"])
         self._find_next(ready)
 
     @Slot(list)
@@ -303,47 +269,27 @@ class PlaybackController(QObject):
             state["upnext"] = "dismissed"
         elif args[0] == "jftv-version" and len(args) > 1:
             self._switch_version(state, args[1])
-        elif args[0] == "jftv-thumb" and len(args) > 1 and state.get("trickplay"):
-            self._thumbnail(state, args[1])
-
-    def _start_trickplay(self, state):
-        old = state.pop("trickplay", None)
-        if old:
-            old.close()
-        info = trickplay.pick(state["item"], state["source"].get("Id"))
-        if info:
-            state["trickplay"] = trickplay.Trickplay(self._session, state["item_id"], state["source"].get("Id"), info)
-            state["player"].command("script-message", "jftv-trickplay", str(info["Width"]), str(info["Height"]))
-        else:
-            state["player"].command("script-message", "jftv-trickplay", "0", "0")
-
-    def _thumbnail(self, state, seconds):
-        provider = state["trickplay"]
-        player = state["player"]
-
-        def done(result):
-            path, width, height = result
-            player.command("script-message-to", "thumbfast", "jftv-thumb-ready", seconds, path, str(width), str(height))
-        self._runner.run(lambda: provider.frame(float(seconds)), done, lambda exc: log.debug("thumbnail failed: %s", exc))
 
     def _versions(self, state):
-        current = state["source"].get("Id")
+        current = stream_id(state["stream"])
         versions = []
-        for source in state["sources"]:
-            info = describe(source)
-            title = " · ".join(p for p in (info["resolution"], info["hdr"], info["codec"], info["audio"], info["size"]) if p)
-            versions.append({"id": info["id"], "title": title or info["title"][:60], "hint": info["title"][:70], "active": info["id"] == current})
+        for stream in state["streams"]:
+            info = describe(stream)
+            versions.append({"id": info["id"], "title": short_label(stream) or info["title"][:60], "hint": info["title"][:70], "active": info["id"] == current})
         return versions
 
     def _switch_version(self, state, source_id):
-        if state is not self._active or source_id == state["source"].get("Id") or state.get("switching_version"):
+        if state is not self._active or source_id == stream_id(state["stream"]) or state.get("switching_version"):
+            return
+        stream = find(state["streams"], source_id)
+        if stream is None:
             return
         state["switching_version"] = True
-        item_id, position = state["item_id"], state["position"]
-        self._settings.set_source(item_id, source_id)
+        remember(state["item"], stream)
         state["player"].command("show-text", "Switching version…", 3000)
+        item, position = state["item"], state["position"]
         self._runner.run(
-            lambda: self._resolve(item_id, position, source_id),
+            lambda: self._resolve(item["id"], position, source_id, item),
             lambda ready: self._version_ready(state, ready),
             lambda exc: self._version_failed(state, exc))
 
@@ -356,27 +302,25 @@ class PlaybackController(QObject):
         self._swap(state, ready)
 
     def _swap(self, state, ready, completed=False):
-        if state.get("trickplay"):
-            state.pop("trickplay").close()
         player = state["player"]
         self._timer.stop()
-        state["reporter"].stop(state["position"], completed, state["duration"] or 0)
+        self._record(state, state["duration"] if completed else None)
         ready["player"] = player
         self._switching = not state["completed"]
         self._active = ready
-        alang = ",".join(preferred(self._settings.get("audio_language"), ready["item"].get("OriginalLanguage")))
+        alang = ",".join(preferred(self._settings.get("audio_language")))
+        player.command("set_property", "http-header-fields", ready["headers"])
         player.load_next(ready["url"], media_title(ready["item"]), ready["start"], alang)
-        self._load_segments(ready)
 
     @Slot(str, float, str)
-    def play_now(self, item_id, start_ticks=0.0, source_id="", paused=False):
+    def play_now(self, item_id, start=0.0, source_id="", paused=False):
         state = self._active
         if state is None:
-            self.play(item_id, start_ticks, source_id, paused)
+            self.play(item_id, start, source_id, paused)
             return
         if paused:
             self.command("set_property", "pause", True)
-        start = max(float(start_ticks or 0) / TICKS, 0.0)
+        start = max(float(start or 0), 0.0)
         state["player"].command("show-text", "Loading…", 3000)
         self._runner.run(
             lambda: self._resolve(item_id, start, source_id or None),
@@ -386,56 +330,13 @@ class PlaybackController(QObject):
     def _play_now_ready(self, state, ready):
         if state is not self._active:
             return
-        self.playbackAdvanced.emit(state["item_id"])
         self._swap(state, ready)
+        self.playbackAdvanced.emit(state["item_id"])
         self._find_next(ready)
 
     def command(self, *args):
         if self._active:
             self._active["player"].command(*args)
-
-    def set_paused(self, value=None):
-        if self._active:
-            self.command("set_property", "pause", (not self._active["paused"]) if value is None else bool(value))
-
-    def seek_to(self, seconds):
-        self.command("seek", "%.3f" % max(seconds, 0.0), "absolute")
-
-    def position(self):
-        return self._active["position"] if self._active else 0.0
-
-    def seek_by(self, seconds):
-        self.command("seek", "%.3f" % seconds, "relative")
-
-    def next(self):
-        state = self._active
-        if state and state["next_item"]:
-            self._request_advance(state)
-
-    def _track_id(self, kind, index):
-        state = self._active
-        if not state:
-            return None
-        streams = state["source"].get("MediaStreams") or []
-        internal = [s for s in streams if s.get("Type") == kind and not s.get("IsExternal")]
-        external = [s for s in streams if s.get("Type") == kind and s.get("IsExternal")]
-        for position, stream in enumerate(internal + external):
-            if stream.get("Index") == index:
-                return position + 1
-        return None
-
-    def set_audio_index(self, index):
-        track = self._track_id("Audio", index)
-        if track is not None:
-            self.command("set_property", "aid", track)
-
-    def set_subtitle_index(self, index):
-        if index is None or int(index) < 0:
-            self.command("set_property", "sid", "no")
-            return
-        track = self._track_id("Subtitle", int(index))
-        if track is not None:
-            self.command("set_property", "sid", track)
 
     def _version_failed(self, state, exc):
         state["switching_version"] = False
@@ -451,6 +352,14 @@ class PlaybackController(QObject):
         self._set_busy(False)
         self.busyChanged.emit()
         self.errorOccurred.emit("Playback failed: %s" % exc)
+
+    def _record(self, state, position=None):
+        history = self._session.history
+        if history is None or not state.get("playing"):
+            return
+        item = state["item"]
+        position = state["position"] if position is None else position
+        history.record(item, position, state["duration"])
 
     @Slot(float)
     def _on_position(self, value):
@@ -469,10 +378,8 @@ class PlaybackController(QObject):
         if not state or state["paused"] == value:
             return
         state["paused"] = value
-        if state["playing"]:
-            state["reporter"].progress(state["position"], value, "Pause" if value else "Unpause")
-            if self.observer:
-                self.observer.on_pause(state, value)
+        if value:
+            self._record(state)
 
     @Slot()
     def _on_file_loaded(self):
@@ -480,25 +387,25 @@ class PlaybackController(QObject):
         state = self._active
         if not state:
             return
-        subs = list(state["subs"])
         player = state["player"]
         state["loaded"] = True
-        self._send_segments(state)
-        self._start_trickplay(state)
         player.set_versions(self._versions(state))
-        original = state["item"].get("OriginalLanguage") or ""
-        self._runner.run(lambda: self._setup_tracks(player, subs, original))
+        item, stream = state["item"], state["stream"]
+        self._runner.run(lambda: self._setup_tracks(player, item, stream))
 
-    def _setup_tracks(self, player, subs, original=""):
-        for sub in subs:
-            player.add_subtitle(sub["url"], sub["title"], sub["lang"])
+    def _setup_tracks(self, player, item, stream):
         tracks = player.get("track-list", []) or []
-        audio_langs = preferred(self._settings.get("audio_language"), original)
-        aid = choose_audio(tracks, audio_langs)
+        aid = choose_audio(tracks, preferred(self._settings.get("audio_language")))
         if aid is not None:
             player.command("set_property", "aid", aid)
         audio = next((t for t in tracks if t.get("type") == "audio" and (t.get("id") == aid or (aid is None and t.get("selected")))), None)
-        sid = choose_subtitle(tracks, preferred(self._settings.get("subtitle_language")), self._settings.get("subtitle_mode"), (audio or {}).get("lang"))
+        sub_langs = preferred(self._settings.get("subtitle_language"))
+        mode = self._settings.get("subtitle_mode")
+        if wants_external(tracks, sub_langs, mode, (audio or {}).get("lang")):
+            for sub in pick_subtitles(self._library.subtitles(item, stream), sub_langs):
+                player.add_subtitle(sub["url"], sub.get("title") or "Addon", sub["lang"])
+            tracks = player.get("track-list", []) or []
+        sid = choose_subtitle(tracks, sub_langs, mode, (audio or {}).get("lang"))
         if sid is not None:
             player.command("set_property", "sid", sid)
 
@@ -509,22 +416,15 @@ class PlaybackController(QObject):
             return
         if not state["playing"]:
             state["playing"] = True
-            state["reporter"].start(state["position"], state["paused"])
             self._timer.start()
             self._set_busy(False)
             self.playbackStarted.emit(state["item_id"])
-            if self.observer:
-                self.observer.on_loaded(state)
-        else:
-            state["reporter"].progress(state["position"], state["paused"], "TimeUpdate")
-            if self.observer:
-                self.observer.on_restart(state)
 
     @Slot()
     def _tick(self):
         state = self._active
-        if state and state["playing"]:
-            state["reporter"].progress(state["position"], state["paused"], "TimeUpdate")
+        if state and state["playing"] and not state["paused"]:
+            self._record(state)
 
     @Slot(str)
     def _on_end_file(self, reason):
@@ -535,7 +435,7 @@ class PlaybackController(QObject):
             return
         if reason == "eof":
             state["completed"] = True
-            if state["next_item"] and not self.observer and state["upnext"] != "dismissed" and (state["advance"] or self._settings.get("autoplay_next")):
+            if state["next_item"] and state["upnext"] != "dismissed" and (state["advance"] or self._settings.get("autoplay_next")):
                 self._request_advance(state)
                 return
         elif reason == "error":
@@ -548,17 +448,15 @@ class PlaybackController(QObject):
         state = self._active
         if not state:
             return
-        if state.get("trickplay"):
-            state["trickplay"].close()
         self._timer.stop()
         self._active = None
         runtime = state["duration"] or 0
-        state["reporter"].stop(state["position"], state["completed"], runtime)
+        self._record(state, runtime if state["completed"] else None)
         state["player"].terminate()
         self._set_busy(False)
         self.busyChanged.emit()
         if state["error"] and not state["playing"]:
-            self.errorOccurred.emit("mpv could not play this source")
+            self.errorOccurred.emit("mpv could not play this version, try another one")
         finished = state["completed"] or (runtime > 0 and state["playing"] and state["position"] / runtime >= 0.9)
         self.last_item = state["item"]
         self.playbackEnded.emit(state["item_id"], bool(finished))
@@ -577,7 +475,8 @@ class PlaybackController(QObject):
         if not state:
             return
         self._timer.stop()
-        state["reporter"].stop(state["position"], False)
-        state["reporter"].flush(3.0)
+        history = self._session.history
+        if history is not None and state.get("playing"):
+            history.record(state["item"], state["position"], state["duration"])
         state["player"].terminate()
         self._active = None

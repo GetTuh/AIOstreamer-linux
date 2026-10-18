@@ -14,7 +14,6 @@ log = logging.getLogger("jellyfin_tv.mpv")
 REMOTE_SCRIPT = Path(__file__).with_name("remote.lua")
 UPNEXT_SCRIPT = Path(__file__).with_name("upnext.lua")
 SKIP_SCRIPT = Path(__file__).with_name("skip.lua")
-THUMB_SCRIPT = Path(__file__).with_name("thumbfast.lua")
 UOSC_DIR = Path(__file__).with_name("uosc")
 UOSC_SCRIPT = UOSC_DIR / "scripts" / "uosc"
 UOSC_FONTS = UOSC_DIR / "fonts"
@@ -107,8 +106,6 @@ def build_options(settings, title="", start=0.0, extra=None, original="", theme=
         if not user_has_uosc():
             scripts.append(str(UOSC_SCRIPT))
             options["osd-fonts-dir"] = str(UOSC_FONTS)
-        if not user_has_script("thumbfast"):
-            scripts.append(str(THUMB_SCRIPT))
         options["script-opts"] = uosc_script_opts(theme)
     else:
         options["script-opts"] = "jftv-overlay=no"

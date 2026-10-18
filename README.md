@@ -1,6 +1,8 @@
 # Jellyfin TV for Linux
 
-A fast, native 10-foot Jellyfin client for Linux TVs and HTPCs. Built with Qt Quick (QML on the GPU scene graph, no web view), driven entirely by a remote, gamepad or keyboard (or your phone), and it hands playback to a fullscreen mpv so HDR and Dolby Vision output stays intact. On KDE it picks up your accent color through Kirigami.
+A fast, native 10-foot client for [AIOStreams](https://github.com/Viren070/AIOStreams) on Linux TVs and HTPCs. Built with Qt Quick (QML on the GPU scene graph, no web view), driven entirely by a remote, gamepad or keyboard, and it hands playback to a fullscreen mpv so HDR and Dolby Vision output stays intact. On KDE it picks up your accent color through Kirigami.
+
+It talks to your AIOStreams configuration directly: catalogs and metadata from the addons you set up there, streams sorted, filtered and formatted by your own AIOStreams rules, and subtitles from your subtitle addons. No Jellyfin server or Stremio app needed. Watch progress, Continue Watching, Next Up and My List are kept on the device.
 
 ![Home](packaging/screenshots/home.jpg)
 
@@ -8,49 +10,45 @@ A fast, native 10-foot Jellyfin client for Linux TVs and HTPCs. Built with Qt Qu
 |---|---|
 | ![Details](packaging/screenshots/details.jpg) | ![Versions](packaging/screenshots/versions.jpg) |
 | ![Show](packaging/screenshots/show.jpg) | ![Search](packaging/screenshots/search.jpg) |
-| ![Up Next in mpv](packaging/screenshots/upnext.jpg) | ![Settings](packaging/screenshots/settings.jpg) |
-| ![Quick Connect](packaging/screenshots/quickconnect.jpg) | ![SyncPlay](packaging/screenshots/syncplay.jpg) |
+| ![Browse a catalog](packaging/screenshots/browse.jpg) | ![Up Next in mpv](packaging/screenshots/upnext.jpg) |
+| ![Sign in](packaging/screenshots/login.jpg) | ![Settings](packaging/screenshots/settings.jpg) |
 
 ## Features
 
-✅ works · ⚠️ depends on what your server provides · ❌ not supported yet. "Tested on" shows what each feature was verified against ("—" means covered by unit tests only): a Remux server (Jellyfin 10.11 API with AIOStreams sources) and a stock Jellyfin 10.11 server.
+✅ works · ⚠️ depends on your AIOStreams configuration · ❌ not supported yet. Tested against AIOStreams 2.36 (self-hosted).
 
-| Feature | Status | Notes | Tested on |
-|---|---|---|---|
-| **Browsing** | | | |
-| Home: Continue Watching, Next Up, Favorites, libraries | ✅ | | Remux |
-| Library grids with sorting, collections | ✅ | | Remux |
-| Shows: seasons, Specials, episode thumbnails, watched/resume markers | ✅ | | Remux |
-| Search with on-screen keyboard | ✅ | | Remux |
-| Details: resume/start over, watched, favorite, More like this | ✅ | | Remux |
-| Trailer playing in the background of a movie or show page, Trailer button / T key for full screen with sound | ✅ | Server trailers, else a YouTube search (yt-dlp); Settings → Trailer previews | Remux |
-| **Accounts** | | | |
-| Username/password login | ✅ | Token kept in the system keyring | Remux, Jellyfin |
-| Quick Connect login (approve on your phone, no typing) | ✅ | Server must have Quick Connect enabled | Remux |
-| Multiple accounts and servers, switch any time | ✅ | | Remux |
-| **Playback** | | | |
-| mpv with `gpu-next`/Vulkan, HDR10/Dolby Vision passthrough | ✅ | Needs an HDR-capable compositor (KDE Plasma 6) | — |
-| Resume, progress and watched sync | ✅ | | Remux |
-| Version picker with bitrate cap and per-title memory | ✅ | Most useful with multi-source servers | Remux |
-| Change version during playback, keeping your position | ✅ | | Remux |
-| Audio/subtitle choice: language preference, Original language (no dubs) | ✅ | | Remux |
-| Audio passthrough (AC3/E-AC3/DTS/TrueHD to a receiver) | ✅ | Settings → Audio output | local mpv |
-| Remote-friendly player controls (uosc) or native mpv controls | ✅ | | Remux |
-| Up Next with countdown, continuing in the same player | ✅ | Uses the server's credits marker when present | Remux |
-| Skip intro / recap / preview | ⚠️ | Server markers (e.g. Intro Skipper plugin) or chapters named Intro/Opening/Recap | Jellyfin (chapters) |
-| Seek preview thumbnails, scrubbing with the remote | ⚠️ | Needs trickplay images on the server | Jellyfin |
-| Chapters menu | ✅ | When the file has chapters | — |
-| **Together and remote** | | | |
-| Remote control / casting from Jellyfin apps (play, pause, seek, tracks, volume, navigate, messages) | ✅ | Settings → Allow remote control | Remux |
-| SyncPlay (watch in sync with other people) | ⚠️ | Server must support SyncPlay groups (stock Jellyfin does; Remux does not) | Jellyfin |
-| **System** | | | |
-| Remote, gamepad and keyboard navigation | ✅ | Gamepad via SDL2 (Xbox, PlayStation, Switch, Steam Input), in menus and the player | — |
-| Steam Big Picture shortcut | ✅ | | Steam |
-| Flatpak with bundled mpv | ✅ | | — |
-| **Not supported yet** | | | |
-| Music, Live TV, photos, books | ❌ | Video only for now | |
-| Subtitle search/download from the server | ❌ | | |
-| Trailers | ❌ | | |
+| Feature | Status | Notes |
+|---|---|---|
+| **Browsing** | | |
+| Home: Continue Watching, Next Up, My List, one row per AIOStreams catalog | ✅ | Catalog order and names come from your configuration |
+| Browse a whole catalog with paging and genre filter | ✅ | |
+| Shows: seasons, Specials, episode thumbnails, watched/resume markers | ⚠️ | Needs a meta addon with episode lists (e.g. Cinemeta, TMDB) |
+| Search movies and shows with the on-screen keyboard | ⚠️ | Uses catalogs that support search |
+| Details: resume/start over, watched, My List | ✅ | |
+| Trailer in the background of a movie or show page, full screen with T / Trailer | ✅ | Trailers from the meta addon, else a YouTube search (yt-dlp) |
+| **Accounts** | | |
+| Sign in with instance address + UUID (or alias) + password, or paste a manifest URL | ✅ | Stored in the system keyring |
+| Several configurations, switch any time | ✅ | Each has its own history and My List |
+| **Playback** | | |
+| mpv with `gpu-next`/Vulkan, HDR10/Dolby Vision passthrough | ✅ | Needs an HDR-capable compositor (KDE Plasma 6) |
+| Versions in your AIOStreams sort order with resolution, HDR, codec, audio, size, service and cache status | ✅ | Uses AIOStreams' parsed stream data |
+| Optional resolution/bitrate caps, remembered choice per title, same release group for the next episode | ✅ | |
+| Change version during playback, keeping your position | ✅ | |
+| Subtitles from your subtitle addons when the file has none in your language | ⚠️ | Needs a subtitle addon (e.g. OpenSubtitles) |
+| Audio/subtitle language preference, audio passthrough | ✅ | |
+| Up Next with countdown, continuing in the same player | ✅ | |
+| Skip intro / recap | ⚠️ | Chapters named Intro/Opening/Recap |
+| Remote-friendly player controls (uosc) or native mpv controls | ✅ | |
+| **Caching** | | |
+| Catalogs, metadata, streams and artwork cached on disk | ✅ | A warm start sends no requests to AIOStreams; Settings → Clear cache |
+| **System** | | |
+| Remote, gamepad and keyboard navigation | ✅ | Gamepad via SDL2 |
+| Steam Big Picture shortcut | ✅ | |
+| Flatpak with bundled mpv | ✅ | |
+| **Not supported** | | |
+| P2P torrent streams | ❌ | Use a debrid or Usenet service in AIOStreams |
+| Watch history synced between devices | ❌ | Kept locally |
+| Seek preview thumbnails | ❌ | |
 
 ## Install
 

@@ -12,9 +12,7 @@ FocusScope {
     }
 
     readonly property var savedAccounts: app.accounts.filter(function (a) { return !a.active })
-    readonly property bool quickConnecting: app.quickConnectCode.length > 0
-
-    onQuickConnectingChanged: quickConnecting ? cancelQuick.forceActiveFocus() : focusFirstEmpty()
+    readonly property bool pastedManifest: serverField.text.indexOf("manifest.json") >= 0 || serverField.text.indexOf("stremio://") === 0
 
     function focusFirstEmpty() {
         if (accountRepeater.count > 0 && !app.loggedIn)
@@ -34,15 +32,19 @@ FocusScope {
         target: app
         function onLoginFailed(message) {
             error.text = message
-            passwordField.forceActiveFocus()
-            passwordField.selectAll()
+            if (page.pastedManifest) {
+                serverField.forceActiveFocus()
+            } else {
+                passwordField.forceActiveFocus()
+                passwordField.selectAll()
+            }
         }
     }
 
     Column {
         anchors.centerIn: parent
         spacing: 24
-        width: 640
+        width: 760
 
         Text {
             text: "Jellyfin TV"
@@ -53,7 +55,7 @@ FocusScope {
         }
 
         Text {
-            text: app.loggedIn ? "Add another account" : (page.savedAccounts.length > 0 ? "Choose an account or sign in" : "Sign in to your server")
+            text: app.loggedIn ? "Add another AIOStreams configuration" : (page.savedAccounts.length > 0 ? "Choose a configuration or sign in" : "Sign in to your AIOStreams configuration")
             color: Theme.textDim
             font.pixelSize: Theme.fontBody
             anchors.horizontalCenter: parent.horizontalCenter
@@ -86,19 +88,20 @@ FocusScope {
         TvTextField {
             id: serverField
             width: parent.width
-            label: "Server"
+            label: "AIOStreams address"
             text: app.serverUrl
-            placeholderText: "http://server:8096"
+            placeholderText: "https://aiostreams.example.com"
             inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase
             KeyNavigation.up: accountRepeater.count > 0 ? accountRepeater.itemAt(accountRepeater.count - 1) : null
-            KeyNavigation.down: userField
-            onAccepted: userField.forceActiveFocus()
+            KeyNavigation.down: page.pastedManifest ? signIn : userField
+            onAccepted: page.pastedManifest ? page.submit() : userField.forceActiveFocus()
         }
 
         TvTextField {
             id: userField
+            visible: !page.pastedManifest
             width: parent.width
-            label: "Username"
+            label: "UUID or alias"
             text: app.settings.username
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             KeyNavigation.up: serverField
@@ -108,6 +111,7 @@ FocusScope {
 
         TvTextField {
             id: passwordField
+            visible: !page.pastedManifest
             width: parent.width
             label: "Password"
             echoMode: TextInput.Password
@@ -121,21 +125,18 @@ FocusScope {
             text: app.busy ? "Signing in…" : "Sign in"
             primary: true
             width: parent.width
-            KeyNavigation.up: passwordField
-            KeyNavigation.down: quickButton
+            KeyNavigation.up: page.pastedManifest ? serverField : passwordField
             onClicked: page.submit()
         }
 
-        TvButton {
-            id: quickButton
-            text: "Use Quick Connect"
-            icon: "⌁"
+        Text {
             width: parent.width
-            KeyNavigation.up: signIn
-            onClicked: {
-                error.text = ""
-                app.startQuickConnect(serverField.text)
-            }
+            text: "The UUID and password are the ones you set on your instance's configure page. "
+                  + "You can also paste your full manifest URL into the address field."
+            color: Theme.textDim
+            font.pixelSize: Theme.fontSmall
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
         }
 
         Text {
@@ -146,69 +147,6 @@ FocusScope {
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
             visible: text.length > 0
-        }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        visible: page.quickConnecting
-        color: Theme.background
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 28
-            width: 900
-
-            Text {
-                text: "Quick Connect"
-                color: Theme.text
-                font.pixelSize: Theme.fontHuge
-                font.bold: true
-                anchors.horizontalCenter: parent.horizontalCenter
-            }
-
-            Text {
-                width: parent.width
-                text: "On your phone or computer, open Jellyfin, go to Settings → Quick Connect and enter this code:"
-                color: Theme.textDim
-                font.pixelSize: Theme.fontBody
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
-
-            Text {
-                text: app.quickConnectCode
-                color: Theme.accent
-                font.pixelSize: 120
-                font.bold: true
-                font.letterSpacing: 24
-                anchors.horizontalCenter: parent.horizontalCenter
-            }
-
-            Row {
-                spacing: 16
-                anchors.horizontalCenter: parent.horizontalCenter
-                Spinner {
-                    width: 30
-                    height: 30
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: "Waiting for approval…"
-                    color: Theme.textDim
-                    font.pixelSize: Theme.fontBody
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
-            TvButton {
-                id: cancelQuick
-                text: "Cancel"
-                anchors.horizontalCenter: parent.horizontalCenter
-                onClicked: app.cancelQuickConnect()
-                Keys.onEscapePressed: app.cancelQuickConnect()
-                Keys.onBackPressed: app.cancelQuickConnect()
-            }
         }
     }
 }

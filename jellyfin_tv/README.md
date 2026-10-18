@@ -1,6 +1,6 @@
 # Jellyfin TV
 
-TV-first Jellyfin/Remux frontend for Linux (PySide6 + QML), driven by remote or keyboard. Playback is handed off to an external fullscreen mpv so HDR passthrough is preserved.
+TV-first AIOStreams client for Linux (PySide6 + QML), driven by remote or keyboard. It uses the Stremio addon protocol of your AIOStreams configuration (catalogs, meta, streams, subtitles); no Jellyfin server or Stremio app. Playback is handed off to an external fullscreen mpv so HDR passthrough is preserved.
 
 ## Run
 
@@ -14,25 +14,30 @@ From a checkout without installing: `python3 -m jellyfin_tv` (deps from `packagi
 
 ## Features
 
-- Home: Continue Watching, Next Up, Favorites, My Media and one row per library
-- Library grid with paging and sorting (default, name, date added, release date, rating)
-- Search with on-screen keyboard (or physical keyboard), movies and shows
-- Movie/episode details: resume or start over, version picker, watched/favorite toggles, More like this
+- Home: Continue Watching, Next Up, My List, one row per AIOStreams catalog, and a Browse row of all catalogs
+- Catalog grid with paging and genre filter (catalogs whose genre is required start at the first option)
+- Search with on-screen keyboard (or physical keyboard) across catalogs that support search, movies and shows
+- Movie/episode details: resume or start over, version picker, watched and My List toggles
 - Shows: seasons including Specials, episode row with thumbnails, watched and resume indicators, Play/Resume next up
-- Version picker: resolution, HDR type, codec, audio, size, release info; sorted best first, choice remembered per title; versions load as the page opens and Play waits for them
-- Default version capped by bitrate (40 Mbps by default) so huge remuxes are only picked on request
-- Audio language "Original" plays the title's own language (series language for episodes) instead of a default dub
-- Up Next card drawn by mpv at the outro or last 30 s, with countdown; the next episode continues in the same mpv
-- Steam shortcuts: the app re-execs with Steam's runtime environment removed
-- Accounts: Quick Connect login, several accounts/servers with switching (login page and Settings)
-- Remote control from Jellyfin apps over the server websocket (play/pause/seek/stop, tracks, volume, UI navigation, messages)
-- SyncPlay page (Home header): create/join/leave groups; playback follows the group clock
-- Skip intro/recap button or automatic skip (server segments or chapter names)
-- Trickplay previews in the uosc timeline and remote scrubbing (Left/Right preview, seek after 0.8 s or OK)
+- Version picker: resolution, HDR, codec, audio, size, debrid service and cache status from AIOStreams' parsed stream data, in your AIOStreams sort order; choice remembered per title (by file name, then release group)
+- Optional caps (Settings → Versions): maximum resolution and bitrate (estimated from size and runtime) skip versions by default
+- Up Next card drawn by mpv in the last 30 s, with countdown; the next episode continues in the same mpv with the same release group (binge group)
+- Subtitles from your subtitle addons, added when the file has no track in your language (two per language)
+- Watch state on the device: resume points (after 60 s), watched at 90 %, Next Up from the last episode you finished
+- Caching: manifest 6 h, catalogs 30 min, search 1 h, meta 24 h (6 h for airing shows), streams 15 min, subtitles 6 h; cached pages paint immediately and stale data is shown when AIOStreams is unreachable; concurrent requests for the same URL share one fetch, at most 4 requests at a time
+- Accounts: several AIOStreams configurations with switching (login page and Settings)
+- Skip intro/recap button or automatic skip (chapter names)
 - Audio output: auto, stereo downmix or passthrough
+- Steam shortcuts: the app re-execs with Steam's runtime environment removed
 - Gamepad (SDL2): A select, B back, Y trailer, X play/pause, Start menu, bumpers page up/down, D-pad/left stick navigate; works in the player too
-- Trailer previews: the movie/show page plays its trailer in place of the backdrop (local trailer first, else RemoteTrailers, else a YouTube search for the title and year, via yt-dlp; streamed, not downloaded); Trailer button or T key plays it full screen with sound, seekable from a local cache, muted by default
-- Settings: audio/subtitle language, subtitle mode, autoplay, countdown, max resolution, HDR preference, max bitrate, player controls (overlay/native), audio output, skip intros, remote control, trailer previews, mpv overrides, accounts
+- Trailer previews: the movie/show page plays its trailer in place of the backdrop (meta trailers, else a YouTube search for the title and year, via yt-dlp; streamed, not downloaded); Trailer button or T key plays it full screen with sound, seekable from a local cache, muted by default
+- Settings: audio/subtitle language, subtitle mode, autoplay, countdown, max resolution, max bitrate, player controls (overlay/native), audio output, skip intros, trailer previews, gamepad, mpv overrides, accounts, clear cache
+
+## Signing in
+
+Enter your instance address (e.g. `https://aiostreams.example.com`), your configuration's UUID or alias and its password. The app asks the instance for your manifest URL once and keeps only that. You can also paste the manifest URL (`.../stremio/<uuid>/<encrypted>/manifest.json`, or a `stremio://` link) into the address field.
+
+Streams that are P2P torrents are hidden: configure a debrid or Usenet service in AIOStreams.
 
 ## Flatpak
 
@@ -44,7 +49,7 @@ flatpak remote-add --user --if-not-exists jellyfin-tv https://gettuh.github.io/j
 flatpak install --user jellyfin-tv io.github.gettuh.JellyfinTV
 ```
 
-The Flatpak bundles its own mpv (`gpu-next`, Vulkan, VA-API). Inside the sandbox the access token is kept in the app's private config dir (mode 0600) because the Secret Service client needs compiled crypto wheels.
+The Flatpak bundles its own mpv (`gpu-next`, Vulkan, VA-API). Inside the sandbox the account list is kept in the app's private config dir (mode 0600) because the Secret Service client needs compiled crypto wheels.
 
 ## Releasing
 
@@ -74,12 +79,14 @@ Override them in `~/.config/jellyfin-tv/mpv.conf` (loaded after the defaults) or
 ## Files
 
 - Settings: `~/.config/jellyfin-tv/settings.ini`
-- Access token: system keyring (service `jellyfin-tv`)
+- Accounts (manifest URLs): system keyring (service `jellyfin-tv`, key `aiostreams`), else `~/.config/jellyfin-tv/accounts.json` (0600)
+- Watch state per account: `~/.config/jellyfin-tv/state/<account>.json`
+- AIOStreams response cache: `~/.cache/jellyfin-tv/aio/<account>/` (entries unused for 30 days are removed)
 - Artwork cache: `~/.cache/jellyfin-tv/images` (pruned at 600 MB)
 
 ## Layout
 
-- `api/` session/auth, library queries, image provider, background tasks
-- `player/` mpv process control, playback controller, Sessions/Playing reporting
+- `api/` AIOStreams client and cache, session/accounts, library queries, watch state, image provider, background tasks
+- `player/` mpv process control, playback controller
 - `models/` Qt models for home rows, grids, details, sources, settings
 - `ui/` QML pages and components

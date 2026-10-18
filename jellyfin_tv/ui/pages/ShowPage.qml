@@ -200,10 +200,10 @@ FocusScope {
                 visible: series.nextUpId.length > 0
                 primary: true
                 icon: "▶"
-                text: (series.nextUpResumeTicks > 0 ? "Resume " : "Play ") + series.nextUpLabel + (series.nextUpResumeText ? "  " + series.nextUpResumeText : "")
+                text: (series.nextUpResumeSeconds > 0 ? "Resume " : "Play ") + series.nextUpLabel + (series.nextUpResumeText ? "  " + series.nextUpResumeText : "")
                 KeyNavigation.right: watchedButton
                 KeyNavigation.down: tabs
-                onClicked: app.play(series.nextUpId, series.nextUpResumeTicks)
+                onClicked: app.play(series.nextUpId, series.nextUpResumeSeconds)
             }
 
             TvButton {

@@ -10,7 +10,6 @@ FocusScope {
     signal openItem(var entry)
     signal openSearch()
     signal openSettings()
-    signal openSyncPlay()
     signal requestQuit()
 
     StackView.onActivated: {
@@ -63,19 +62,8 @@ FocusScope {
                 focus: true
                 icon: "⌕"
                 text: "Search"
-                KeyNavigation.right: syncButton
-                onClicked: page.openSearch()
-                Keys.onDownPressed: rows.forceActiveFocus()
-            }
-
-            TvButton {
-                id: syncButton
-                icon: "⇄"
-                text: app.syncplay.active ? app.syncplay.groupName : "SyncPlay"
-                primary: app.syncplay.active
-                KeyNavigation.left: searchButton
                 KeyNavigation.right: settingsButton
-                onClicked: page.openSyncPlay()
+                onClicked: page.openSearch()
                 Keys.onDownPressed: rows.forceActiveFocus()
             }
 
@@ -83,7 +71,7 @@ FocusScope {
                 id: settingsButton
                 icon: "⚙"
                 text: "Settings"
-                KeyNavigation.left: syncButton
+                KeyNavigation.left: searchButton
                 onClicked: page.openSettings()
                 Keys.onDownPressed: rows.forceActiveFocus()
             }
@@ -127,7 +115,10 @@ FocusScope {
                 var saved = page.rowIndexes[row.rowKey]
                 if (saved !== undefined && saved < count && currentIndex !== saved)
                     currentIndex = saved
-                if (count > 0 && rows.currentItem && rows.currentItem.count === 0) {
+                if (count > 0 && row.index < rows.currentIndex && page.visibleRow(row.index + 1, 1) === rows.currentIndex) {
+                    rows.currentIndex = row.index
+                    rows.positionViewAtBeginning()
+                } else if (count > 0 && rows.currentItem && rows.currentItem.count === 0) {
                     var next = page.visibleRow(rows.currentIndex, 1)
                     if (next >= 0)
                         rows.currentIndex = next

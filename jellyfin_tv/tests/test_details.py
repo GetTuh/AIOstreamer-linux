@@ -18,15 +18,28 @@ class ManualRunner:
             on_done(fn())
 
 
-class FakeLibrary:
-    def item(self, item_id):
-        return {"Id": item_id, "Type": "Movie"}
+def stream(sid, res, size):
+    return {"url": "https://x/" + sid, "behaviorHints": {"filename": sid + ".mkv"}, "streamData": {"id": sid, "size": size, "parsedFile": {"resolution": res}}}
 
-    def sources(self, item_id):
-        return [
-            {"Id": "remux", "Name": "2160p", "Bitrate": 80_000_000},
-            {"Id": "web", "Name": "2160p", "Bitrate": 6_000_000},
-        ]
+
+class FakeLibrary:
+    history = None
+
+    def __init__(self):
+        self.stream_calls = []
+
+    def known(self, item_id):
+        return {"type": "Movie", "stremioType": "movie"} if item_id != "unknown" else {}
+
+    def peek_item(self, item_id):
+        return None
+
+    def item(self, item_id):
+        return {"id": item_id, "type": "Movie", "stremioType": "movie", "runtime": 7200}
+
+    def streams(self, item, fresh=False):
+        self.stream_calls.append((item["id"], fresh))
+        return [stream("remux", "2160p", 72_000_000_000), stream("web", "2160p", 9_000_000_000)]
 
 
 class DetailsPlayTest(unittest.TestCase):
@@ -38,7 +51,7 @@ class DetailsPlayTest(unittest.TestCase):
         services.settings = FakeSettings(max_bitrate=40)
         self.model = DetailsModel()
         self.played = []
-        self.model.playRequested.connect(lambda ticks, sid: self.played.append((ticks, sid)))
+        self.model.playRequested.connect(lambda seconds, sid: self.played.append((seconds, sid)))
         self.model.itemId = "movie"
         fn, on_done = self.runner.calls.pop(0)
         on_done(fn())
@@ -62,32 +75,50 @@ class DetailsPlayTest(unittest.TestCase):
         self.model.play(0)
         self.assertEqual(self.played, [(0.0, "web"), (0.0, "web")])
 
-    def test_sources_load_from_the_start_and_rerank_when_item_arrives(self):
-        services.library.item = lambda item_id: {"Id": item_id, "Type": "Movie", "OriginalLanguage": "ja"}
-        services.library.sources = lambda item_id: [
-            {"Id": "dub", "Name": "2160p", "MediaStreams": [{"Type": "Audio", "Language": "eng"}]},
-            {"Id": "orig", "Name": "1080p", "MediaStreams": [{"Type": "Audio", "Language": "jpn"}]},
-        ]
-        services.settings = FakeSettings(audio_language="original")
+    def test_sources_start_before_item_when_type_known(self):
         self.runner.calls.clear()
         model = DetailsModel()
-        model.itemId = "anime"
+        model.itemId = "movie2"
         self.assertTrue(model.sourcesLoading)
-        item_call, sources_call = self.runner.calls
-        sources_call[1](sources_call[0]())
-        self.assertEqual(model.selectedSourceId, "dub")
-        item_call[1](item_call[0]())
-        self.assertEqual(model.selectedSourceId, "orig")
+        self.assertEqual(len(self.runner.calls), 2)
         self.runner.calls.clear()
 
+    def test_unknown_type_waits_for_item(self):
+        self.runner.calls.clear()
+        model = DetailsModel()
+        model.itemId = "unknown"
+        self.assertFalse(model.sourcesLoading)
+        self.assertEqual(len(self.runner.calls), 1)
+        self.runner.flush()
+        self.assertEqual(model.sourceCount, 2)
+        self.assertEqual(services.library.stream_calls[-1], ("unknown", False))
+
+    def test_refresh_sources_bypasses_cache(self):
+        self.runner.flush()
+        self.model.refreshSources()
+        self.runner.flush()
+        self.assertEqual(services.library.stream_calls[-1], ("movie", True))
+
+    def test_select_source_is_remembered(self):
+        self.runner.flush()
+        self.model.selectSource("remux")
+        self.assertEqual(self.model.selectedSourceId, "remux")
+        other = DetailsModel()
+        other.itemId = "movie"
+        self.runner.flush()
+        self.assertEqual(other.selectedSourceId, "remux")
+
     def test_non_playable_item_stops_loading(self):
-        services.library.item = lambda item_id: {"Id": item_id, "Type": "Series"}
+        services.library.known = lambda item_id: {"type": "Series"}
+        services.library.item = lambda item_id: {"id": item_id, "type": "Series"}
+        services.library.series = lambda series_id, kind: ({}, [])
         self.runner.calls.clear()
         model = DetailsModel()
         model.itemId = "series"
-        item_call = self.runner.calls[0]
-        item_call[1](item_call[0]())
         self.assertFalse(model.sourcesLoading)
+        self.runner.flush()
+        self.assertFalse(model.sourcesLoading)
+        self.assertFalse(model.playable)
         self.runner.calls.clear()
 
     def test_changing_item_drops_pending_play(self):

@@ -29,12 +29,7 @@ FocusScope {
         id: details
         itemId: page.itemId
         onUserDataChanged: (changedId) => app.notifyChanged(changedId)
-        onPlayRequested: (ticks, sourceId) => app.playSource(page.itemId, ticks, sourceId)
-    }
-
-    SimilarModel {
-        id: similar
-        itemId: details.loaded && (details.itemType === "Movie" || details.itemType === "Series") ? page.itemId : ""
+        onPlayRequested: (seconds, sourceId) => app.playSource(page.itemId, seconds, sourceId)
     }
 
     Component.onCompleted: page.forceActiveFocus()
@@ -53,8 +48,6 @@ FocusScope {
             page.forceActiveFocus()
             return
         }
-        if (similarRow.activeFocus)
-            return
         var current = buttonRow.children
         for (var i = 0; i < current.length; i++) {
             if (current[i].activeFocus && current[i].visible)
@@ -142,7 +135,7 @@ FocusScope {
         opacity: page.chrome
         visible: details.loaded
         x: Theme.margin
-        y: similarRow.visible ? 64 : Math.max(64, (parent.height - height) / 2)
+        y: Math.max(64, (parent.height - height) / 2)
         width: Math.min(parent.width * 0.55, 1000)
         spacing: 18
 
@@ -223,15 +216,14 @@ FocusScope {
 
             TvButton {
                 id: resumeButton
-                visible: details.playable && details.resumeTicks > 0
+                visible: details.playable && details.resumeSeconds > 0
                 primary: true
                 icon: "▶"
                 text: "Resume " + details.resumeText
                 KeyNavigation.right: playButton
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 busy: details.sourcesLoading
                 dimmed: details.sourcesLoading
-                onClicked: details.play(details.resumeTicks)
+                onClicked: details.play(details.resumeSeconds)
             }
 
             TvButton {
@@ -242,7 +234,6 @@ FocusScope {
                 text: resumeButton.visible ? "From beginning" : "Play"
                 KeyNavigation.left: resumeButton.visible ? resumeButton : null
                 KeyNavigation.right: versionButton.visible ? versionButton : watchedButton
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 busy: details.sourcesLoading && !resumeButton.visible
                 dimmed: details.sourcesLoading
                 onClicked: details.play(0)
@@ -255,7 +246,6 @@ FocusScope {
                 text: details.sourcesLoading ? "Versions…" : "Version (" + details.sourceCount + ")"
                 KeyNavigation.left: playButton
                 KeyNavigation.right: watchedButton
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 onClicked: page.openSources(details)
             }
 
@@ -265,7 +255,6 @@ FocusScope {
                 text: details.played ? "Watched" : "Mark watched"
                 KeyNavigation.left: versionButton.visible ? versionButton : (playButton.visible ? playButton : null)
                 KeyNavigation.right: favoriteButton
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 onClicked: details.togglePlayed()
             }
 
@@ -275,7 +264,6 @@ FocusScope {
                 text: details.favorite ? "Favorite" : "Add favorite"
                 KeyNavigation.left: watchedButton
                 KeyNavigation.right: trailerButton.visible ? trailerButton : (seriesButton.visible ? seriesButton : null)
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 onClicked: details.toggleFavorite()
             }
 
@@ -288,7 +276,6 @@ FocusScope {
                 text: hero.status === "none" ? "No trailer" : "Trailer"
                 KeyNavigation.left: favoriteButton
                 KeyNavigation.right: seriesButton.visible ? seriesButton : null
-                KeyNavigation.down: similarRow.visible ? similarRow : null
                 onClicked: trailerControls.enter(trailerButton)
             }
 
@@ -337,21 +324,9 @@ FocusScope {
             font.pixelSize: Theme.fontBody
             lineHeight: 1.2
             wrapMode: Text.WordWrap
-            maximumLineCount: similarRow.visible ? 4 : 6
+            maximumLineCount: 6
             elide: Text.ElideRight
         }
-    }
-
-    MediaRow {
-        id: similarRow
-        opacity: page.chrome
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; bottomMargin: 8 }
-        visible: details.loaded && count > 0
-        title: "More like this"
-        rowModel: similar
-        landscape: true
-        Keys.onUpPressed: page.primaryButton().forceActiveFocus()
-        onActivated: (i) => page.openItem(similar.get(i))
     }
 
     TrailerControls {

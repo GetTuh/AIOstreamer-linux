@@ -79,8 +79,8 @@ FocusScope {
             SettingRow {
                 id: first
                 label: "Audio language"
-                hint: "Original picks the movie's or show's own language, so no dubs"
-                options: [{ value: "original", text: "Original" }].concat(page.languages)
+                hint: "Picks this audio track when a version has several"
+                options: page.languages
                 value: app.settings.audioLanguage
                 onPicked: (v) => app.settings.audioLanguage = v
                 KeyNavigation.down: subLang
@@ -132,7 +132,7 @@ FocusScope {
             SettingRow {
                 id: skipSegments
                 label: "Skip intros and recaps"
-                hint: "Uses the server's markers, or chapters named Intro/Opening/Recap"
+                hint: "Uses chapters named Intro/Opening/Recap"
                 options: [{ value: "ask", text: "Show button" }, { value: "auto", text: "Automatically" }, { value: "off", text: "Off" }]
                 value: app.settings.skipSegments
                 onPicked: (v) => app.settings.skipSegments = v
@@ -161,20 +161,10 @@ FocusScope {
             SettingRow {
                 id: maxRes
                 label: "Maximum resolution"
-                hint: "Used to pick the default version"
+                hint: "Your AIOStreams sort order is kept; versions above these limits are skipped by default"
                 options: [{ value: 0, text: "Unlimited" }, { value: 2160, text: "4K" }, { value: 1080, text: "1080p" }, { value: 720, text: "720p" }]
                 value: app.settings.maxResolution
                 onPicked: (v) => app.settings.maxResolution = v
-                KeyNavigation.down: hdr
-                onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
-            }
-
-            SettingRow {
-                id: hdr
-                label: "Prefer HDR / Dolby Vision"
-                options: page.onOff
-                value: app.settings.preferHdr
-                onPicked: (v) => app.settings.preferHdr = v
                 KeyNavigation.down: maxBitrate
                 onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
             }
@@ -182,7 +172,7 @@ FocusScope {
             SettingRow {
                 id: maxBitrate
                 label: "Maximum bitrate"
-                hint: "Higher versions are only picked when nothing else fits"
+                hint: "Estimated from size and runtime"
                 options: [{ value: 0, text: "Unlimited" }, { value: 80, text: "80 Mbps" }, { value: 40, text: "40 Mbps" }, { value: 20, text: "20 Mbps" }, { value: 10, text: "10 Mbps" }]
                 value: app.settings.maxBitrate
                 onPicked: (v) => app.settings.maxBitrate = v
@@ -235,13 +225,13 @@ FocusScope {
                 }
                 Keys.onUpPressed: (event) => {
                     if (cursorRectangle.y < 10)
-                        hdr.forceActiveFocus()
+                        playerUi.forceActiveFocus()
                     else
                         event.accepted = false
                 }
                 Keys.onDownPressed: (event) => {
                     if (cursorRectangle.y + cursorRectangle.height > contentHeight - 10)
-                        remoteControl.forceActiveFocus()
+                        trailerPreviews.forceActiveFocus()
                     else
                         event.accepted = false
                 }
@@ -261,25 +251,13 @@ FocusScope {
             }
 
             SettingRow {
-                id: remoteControl
-                label: "Allow remote control"
-                hint: "Play, pause and browse from the Jellyfin app on your phone or browser"
-                options: page.onOff
-                value: app.settings.remoteControl
-                onPicked: (v) => app.settings.remoteControl = v
-                KeyNavigation.up: mpvExtra
-                KeyNavigation.down: trailerPreviews
-                onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
-            }
-
-            SettingRow {
                 id: trailerPreviews
                 label: "Trailer previews"
                 hint: "Plays the trailer in the background of a movie or show page"
                 options: [{ value: "muted", text: "Muted" }, { value: "sound", text: "With sound" }, { value: "off", text: "Off" }]
                 value: app.settings.trailerPreviews
                 onPicked: (v) => app.settings.trailerPreviews = v
-                KeyNavigation.up: remoteControl
+                KeyNavigation.up: mpvExtra
                 KeyNavigation.down: gamepadRow
                 onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
             }
@@ -328,15 +306,25 @@ FocusScope {
                     icon: "+"
                     text: "Add account"
                     KeyNavigation.up: accountList.count > 0 ? accountList.itemAt(accountList.count - 1) : gamepadRow
-                    KeyNavigation.right: signOut
+                    KeyNavigation.right: clearCache
                     onClicked: page.addAccount()
+                    onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
+                }
+                TvButton {
+                    id: clearCache
+                    icon: "↻"
+                    text: "Clear cache"
+                    KeyNavigation.up: addAccountButton.KeyNavigation.up
+                    KeyNavigation.left: addAccountButton
+                    KeyNavigation.right: signOut
+                    onClicked: app.clearCache()
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
                 }
                 TvButton {
                     id: signOut
                     text: "Sign out of " + app.userName
                     KeyNavigation.up: addAccountButton.KeyNavigation.up
-                    KeyNavigation.left: addAccountButton
+                    KeyNavigation.left: clearCache
                     onClicked: app.logout()
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
                 }

@@ -2,7 +2,7 @@
   "name": "python-deps",
   "buildsystem": "simple",
   "build-commands": [
-    "pip3 install --verbose --exists-action=i --no-deps --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} --no-build-isolation certifi charset-normalizer idna jaraco.classes jaraco.context jaraco.functools keyring more-itertools requests typing-extensions urllib3 websocket-client yt-dlp"
+    "pip3 install --verbose --exists-action=i --no-deps --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} --no-build-isolation certifi charset-normalizer idna jaraco.classes jaraco.context jaraco.functools keyring more-itertools requests typing-extensions urllib3 yt-dlp"
   ],
   "sources": [
     {
@@ -59,11 +59,6 @@
       "type": "file",
       "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
       "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3"
-    },
-    {
-      "type": "file",
-      "url": "https://files.pythonhosted.org/packages/d5/d2/cc4dc1271e464942db7ee278baae2daa99ee77cb2af744025c04da585a3e/websocket_client-1.9.2-py3-none-any.whl",
-      "sha256": "e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce"
     },
     {
       "type": "file",

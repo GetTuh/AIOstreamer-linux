@@ -15,7 +15,6 @@ PACKAGES = {
     "requests": "2.33.1",
     "typing-extensions": "4.16.0",
     "urllib3": "2.8.0",
-    "websocket-client": "1.9.2",
     "yt-dlp": "2026.8.19",
 }
 

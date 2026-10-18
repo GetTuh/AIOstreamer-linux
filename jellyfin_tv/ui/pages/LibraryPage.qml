@@ -7,8 +7,10 @@ import JellyfinTV
 FocusScope {
     id: page
 
-    property string parentId
-    property string collectionType
+    property string catalogType
+    property string catalogId
+    property var genres: []
+    property bool genreRequired: false
     property string title
     readonly property alias libraryModel: library
 
@@ -19,8 +21,10 @@ FocusScope {
 
     LibraryModel {
         id: library
-        parentId: page.parentId
-        collectionType: page.collectionType
+        catalogType: page.catalogType
+        catalogId: page.catalogId
+        genres: page.genres
+        genreRequired: page.genreRequired
     }
 
     Component.onCompleted: {
@@ -49,9 +53,12 @@ FocusScope {
     TvButton {
         id: sortButton
         anchors { right: parent.right; rightMargin: Theme.margin; verticalCenter: heading.verticalCenter }
-        icon: "⇅"
-        text: "Sort: " + library.sortName
-        onClicked: library.sortIndex = library.sortIndex + 1
+        visible: library.genres.length > 0
+        icon: "‹›"
+        text: "Genre: " + library.genreName
+        onClicked: library.stepGenre(1)
+        Keys.onRightPressed: library.stepGenre(1)
+        Keys.onLeftPressed: library.stepGenre(-1)
         Keys.onDownPressed: grid.forceActiveFocus()
     }
 
@@ -101,8 +108,10 @@ FocusScope {
         onCountChanged: if (count > 0 && currentIndex < 0) currentIndex = 0
 
         Keys.onUpPressed: (event) => {
-            if (currentIndex < columns)
+            if (currentIndex < columns && sortButton.visible)
                 sortButton.forceActiveFocus()
+            else if (currentIndex < columns)
+                return
             else
                 moveCurrentIndexUp()
         }

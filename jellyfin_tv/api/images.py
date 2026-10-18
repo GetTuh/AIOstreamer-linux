@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import logging
 import os
 import threading
@@ -9,79 +11,41 @@ from PySide6.QtCore import QRunnable, QSize, Qt, QThreadPool
 from PySide6.QtGui import QImage
 from PySide6.QtQuick import QQuickAsyncImageProvider, QQuickImageResponse, QQuickTextureFactory
 
+from jellyfin_tv.api.aio import USER_AGENT
+
 log = logging.getLogger("jellyfin_tv.images")
 
-PROVIDER_ID = "jf"
+PROVIDER_ID = "img"
 WIDTHS = {"poster": 360, "thumb": 560, "backdrop": 1920, "logo": 800}
 CACHE_LIMIT_BYTES = 600 * 1024 * 1024
+FAILED_RETRY_S = 600
 
 
-def _source(item_id, image_type, tag, width, index=None):
-    if not item_id or not tag:
+def encode_url(url):
+    return base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+
+
+def decode_url(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4)).decode()
+
+
+def proxied(url, kind="poster"):
+    if not url or not url.startswith(("http://", "https://")):
         return ""
-    kind = image_type if index is None else "%s.%s" % (image_type, index)
-    return "image://%s/%s/%s/%d/%s" % (PROVIDER_ID, item_id, kind, width, tag)
-
-
-def _primary(item, width):
-    tags = item.get("ImageTags") or {}
-    if tags.get("Primary"):
-        return _source(item["Id"], "Primary", tags["Primary"], width)
-    return ""
-
-
-def _series_primary(item, width):
-    if item.get("SeriesPrimaryImageTag"):
-        return _source(item.get("SeriesId"), "Primary", item["SeriesPrimaryImageTag"], width)
-    return ""
-
-
-def _thumb(item, width):
-    tags = item.get("ImageTags") or {}
-    if tags.get("Thumb"):
-        return _source(item["Id"], "Thumb", tags["Thumb"], width)
-    if item.get("ParentThumbImageTag"):
-        return _source(item.get("ParentThumbItemId"), "Thumb", item["ParentThumbImageTag"], width)
-    return ""
-
-
-def _backdrop(item, width):
-    tags = item.get("BackdropImageTags") or []
-    if tags:
-        return _source(item["Id"], "Backdrop", tags[0], width, 0)
-    parent_tags = item.get("ParentBackdropImageTags") or []
-    if parent_tags:
-        return _source(item.get("ParentBackdropItemId"), "Backdrop", parent_tags[0], width, 0)
-    return ""
-
-
-def _logo(item, width):
-    tags = item.get("ImageTags") or {}
-    if tags.get("Logo"):
-        return _source(item["Id"], "Logo", tags["Logo"], width)
-    if item.get("ParentLogoImageTag"):
-        return _source(item.get("ParentLogoItemId"), "Logo", item["ParentLogoImageTag"], width)
-    if item.get("Type") == "Episode" and item.get("SeriesId"):
-        return _source(item["SeriesId"], "Logo", "series", width)
-    return ""
+    return "image://%s/%s/%s" % (PROVIDER_ID, kind, encode_url(url))
 
 
 def image_source(item, kind):
-    width = WIDTHS[kind]
     if kind == "poster":
-        chain = (_primary, _series_primary, _thumb)
-        if item.get("Type") == "Episode":
-            chain = (_series_primary, _primary)
+        chain = ("poster", "thumbnail", "background")
     elif kind == "thumb":
-        chain = (_thumb, _backdrop, _primary)
-        if item.get("Type") == "Episode":
-            chain = (_primary, _thumb, _backdrop)
+        chain = ("thumbnail", "background", "poster") if item.get("type") == "Episode" else ("background", "thumbnail", "poster")
     elif kind == "backdrop":
-        chain = (_backdrop, _thumb)
+        chain = ("background", "thumbnail")
     else:
-        chain = (_logo,)
-    for fn in chain:
-        src = fn(item, width)
+        chain = ("logo",)
+    for key in chain:
+        src = proxied(item.get(key) or "", kind)
         if src:
             return src
     return ""
@@ -128,15 +92,15 @@ class _Job(QRunnable):
 
 
 class ImageProvider(QQuickAsyncImageProvider):
-    def __init__(self, session, cache_root):
+    def __init__(self, cache_root):
         super().__init__()
-        self.session = session
         self.cache = Path(cache_root) / "images"
         self.cache.mkdir(parents=True, exist_ok=True)
         self.pool = QThreadPool()
         self.pool.setMaxThreadCount(4)
         self._http = threading.local()
         self._pending = {}
+        self._failed = {}
         self._lock = threading.Lock()
         threading.Thread(target=self.prune, name="jftv-image-prune", daemon=True).start()
 
@@ -158,15 +122,23 @@ class ImageProvider(QQuickAsyncImageProvider):
         sess = getattr(self._http, "session", None)
         if sess is None:
             sess = requests.Session()
+            sess.headers["User-Agent"] = USER_AGENT
             self._http.session = sess
         return sess
 
     def load(self, image_id, size):
-        item_id, kind, width, tag = image_id.split("/", 3)
-        image_type, _, index = kind.partition(".")
-        path = self.cache / ("%s_%s_%s_%s.img" % (item_id, kind, width, tag))
+        _kind, encoded = image_id.split("/", 1)
+        url = decode_url(encoded)
+        path = self.cache / (hashlib.sha1(url.encode()).hexdigest() + ".img")
         if not path.exists():
-            self._download(item_id, image_type, index, width, tag, path)
+            failed = self._failed.get(url)
+            if failed and time.monotonic() - failed < FAILED_RETRY_S:
+                return QImage()
+            try:
+                self._download(url, path)
+            except Exception:
+                self._failed[url] = time.monotonic()
+                raise
         else:
             try:
                 os.utime(path)
@@ -185,10 +157,8 @@ class ImageProvider(QQuickAsyncImageProvider):
             image = image.scaledToHeight(size.height(), Qt.SmoothTransformation)
         return image
 
-    def _download(self, item_id, image_type, index, width, tag, path):
-        handler = "Items/%s/Images/%s%s" % (item_id, image_type, "/" + index if index else "")
-        url = self.session.url(handler, maxWidth=width, quality=90, tag=tag)
-        resp = self._requests().get(url, headers={"Authorization": self.session.auth_header()}, timeout=20)
+    def _download(self, url, path):
+        resp = self._requests().get(url, timeout=20)
         resp.raise_for_status()
         tmp = path.with_suffix(".part%d" % threading.get_ident())
         tmp.write_bytes(resp.content)

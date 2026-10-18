@@ -1,31 +1,27 @@
 import logging
 import time
 
-from PySide6.QtCore import Property, QEvent, QMetaObject, QObject, Q_ARG, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import Property, QEvent, QObject, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QKeyEvent
 from PySide6.QtQml import qmlRegisterType
 
 from jellyfin_tv.api.library import Library
-from jellyfin_tv.api.remote_socket import RemoteSocket
 from jellyfin_tv.api.session import LoginError, Session
 from jellyfin_tv.api.tasks import TaskRunner
 from jellyfin_tv.gamepad import Gamepad
 from jellyfin_tv.inhibit import SleepInhibitor
 from jellyfin_tv.models.details import DetailsModel
 from jellyfin_tv.models.home import HomeModel
-from jellyfin_tv.models.items import LibraryModel, SearchModel, SimilarModel
+from jellyfin_tv.models.items import LibraryModel, SearchModel
 from jellyfin_tv.models.series import SeriesModel
 from jellyfin_tv.models.services import services
 from jellyfin_tv.models.trailers import TrailerPreview
 from jellyfin_tv.player.playback import PlaybackController
-from jellyfin_tv.player.remote_control import RemoteControl
-from jellyfin_tv.player.syncplay import SyncPlay
 
 log = logging.getLogger("jellyfin_tv.app")
 
 QML_MODULE = "JellyfinTV"
 REACTIVATE_MS = (400, 1200)
-QUICK_CONNECT_POLL_MS = 3000
 GAMEPAD_AFTER_PLAYBACK_S = 15
 GAMEPAD_QT_KEYS = {
     "up": (Qt.Key_Up, ""),
@@ -57,7 +53,6 @@ GAMEPAD_MPV_KEYS = {
 class AppController(QObject):
     sessionChanged = Signal()
     accountsChanged = Signal()
-    quickConnectChanged = Signal()
     loginFailed = Signal(str)
     busyChanged = Signal()
     message = Signal(str)
@@ -79,10 +74,6 @@ class AppController(QObject):
         self._window = None
         self._visibility = None
         self._accounts = []
-        self._quick_code = ""
-        self._quick_timer = QTimer(self)
-        self._quick_timer.setInterval(QUICK_CONNECT_POLL_MS)
-        self._quick_timer.timeout.connect(self._poll_quick_connect)
         self.player = PlaybackController(self.runner, self.session, self.library, settings, self)
         self.player.playbackStarted.connect(self._on_playback_started)
         self.player.playbackEnded.connect(self._on_playback_ended)
@@ -91,13 +82,6 @@ class AppController(QObject):
         self._trailers = TrailerPreview(self.runner, self.library, settings, parent=self)
         self._inhibitor = SleepInhibitor(parent=self)
         self.player.playbackStarted.connect(lambda _id: self._trailers.stop())
-        self.remote_socket = RemoteSocket(self)
-        self.remote = RemoteControl(self.player, self, self)
-        self.remote_socket.message.connect(self.remote.handle)
-        self._syncplay = SyncPlay(self.session, self.player, self.runner, self)
-        self._syncplay.notice.connect(self.message)
-        self._remote_on = None
-        settings.changed.connect(self._sync_remote)
         self._playback_ended_at = None
         self.gamepad = Gamepad(parent=self)
         self.gamepad.action.connect(self.gamepad_action)
@@ -107,7 +91,6 @@ class AppController(QObject):
         qmlRegisterType(DetailsModel, QML_MODULE, 1, 0, "DetailsModel")
         qmlRegisterType(LibraryModel, QML_MODULE, 1, 0, "LibraryModel")
         qmlRegisterType(SeriesModel, QML_MODULE, 1, 0, "SeriesModel")
-        qmlRegisterType(SimilarModel, QML_MODULE, 1, 0, "SimilarModel")
         qmlRegisterType(SearchModel, QML_MODULE, 1, 0, "SearchModel")
 
     def attach_window(self, window):
@@ -141,10 +124,6 @@ class AppController(QObject):
     def accounts(self):
         return self._accounts
 
-    @Property(str, notify=quickConnectChanged)
-    def quickConnectCode(self):
-        return self._quick_code
-
     def _refresh_accounts(self):
         self.runner.run(self.session.accounts, self._accounts_loaded, lambda _e: None)
 
@@ -153,55 +132,16 @@ class AppController(QObject):
         self.accountsChanged.emit()
 
     @Slot(str)
-    def startQuickConnect(self, server):
-        if self._busy:
-            return
-        self._set_busy(True)
-        self.runner.run(lambda: self.session.quick_connect_start(server), self._quick_started, self._login_failed)
-
-    def _quick_started(self, code):
-        self._set_busy(False)
-        self._quick_code = code
-        self.quickConnectChanged.emit()
-        self._quick_timer.start()
-
-    def _poll_quick_connect(self):
-        self.runner.run(self.session.quick_connect_poll, self._quick_polled, self._quick_failed)
-
-    def _quick_polled(self, done):
-        if done and self._quick_code:
-            self.cancelQuickConnect()
-            self._logged_in(True)
-
-    def _quick_failed(self, exc):
-        self.cancelQuickConnect()
-        self._login_failed(exc)
-
-    @Slot()
-    def cancelQuickConnect(self):
-        self._quick_timer.stop()
-        self.session.quick_connect_cancel()
-        if self._quick_code:
-            self._quick_code = ""
-            self.quickConnectChanged.emit()
-
-    @Slot(str)
     def switchAccount(self, key):
         if self._busy:
             return
         self.player.stop()
-        if self._syncplay.active:
-            self._syncplay.leave()
-        self.remote_socket.stop()
-        self._remote_on = None
         self._set_busy(True)
         self.runner.run(lambda: self.session.switch(key), self._logged_in, self._switch_failed)
 
     def _switch_failed(self, exc):
-        self._home = None
         self._login_failed(exc)
         self._refresh_accounts()
-        self.sessionChanged.emit()
 
     @Property(str, notify=sessionChanged)
     def serverUrl(self):
@@ -223,7 +163,12 @@ class AppController(QObject):
     @Slot()
     def restore(self):
         self._set_busy(True)
-        self.runner.run(self.session.restore, self._restored, self._restored)
+        self.runner.run(self.session.restore, self._restored, self._restore_failed)
+
+    def _restore_failed(self, exc):
+        self._restored(False)
+        if isinstance(exc, LoginError):
+            self.message.emit(str(exc))
 
     def _restored(self, ok):
         self._set_busy(False)
@@ -253,23 +198,22 @@ class AppController(QObject):
 
     @Slot()
     def logout(self):
-        if self._syncplay.active:
-            self._syncplay.leave()
         self.player.stop()
-        self._set_busy(True)
-        self.runner.run(self.session.logout, self._logged_out, self._logged_out)
-
-    def _logged_out(self, _):
-        self._set_busy(False)
+        self.session.logout()
         self._home = None
-        self._sync_remote()
         self._refresh_accounts()
         self.sessionChanged.emit()
 
     def _start_home(self):
         self._home = HomeModel(self.runner, self.library, self)
         self._home.load()
-        self._sync_remote()
+
+    @Slot()
+    def clearCache(self):
+        self.session.clear_cache()
+        if self._home is not None:
+            self._home.refreshCatalogs()
+        self.message.emit("Cache cleared")
 
     @Property(QObject, constant=True)
     def trailers(self):
@@ -279,34 +223,11 @@ class AppController(QObject):
     def inhibitor(self):
         return self._inhibitor
 
-    @Property(QObject, constant=True)
-    def syncplay(self):
-        return self._syncplay
-
-    def syncplay_message(self, message):
-        self._syncplay.handle(message)
-
-    def _sync_remote(self):
-        enabled = bool(self._settings.get("remote_control"))
-        self.remote.enabled = enabled
-        wanted = (self.session.token, enabled) if self.session.logged_in else None
-        if wanted == self._remote_on:
-            return
-        self.remote_socket.stop()
-        if wanted:
-            s = self.session
-            self.remote_socket.start(s.server, s.token, self._settings.device_id, s.auth_header(), enabled)
-        self._remote_on = wanted
-
     def press(self, key, text=""):
         if self._window is None:
             return
         for kind in (QEvent.KeyPress, QEvent.KeyRelease):
             QGuiApplication.sendEvent(self._window, QKeyEvent(kind, key, Qt.NoModifier, text))
-
-    def type_text(self, text):
-        for char in text:
-            self.press(Qt.Key_unknown, char)
 
     def start_gamepad(self):
         return self.gamepad.start()
@@ -330,40 +251,13 @@ class AppController(QObject):
         key, text = GAMEPAD_QT_KEYS[action]
         self.press(key, text)
 
-    def toast(self, text):
-        self.message.emit(text)
-
-    def _invoke(self, name, *args):
-        if self._window is not None:
-            QMetaObject.invokeMethod(self._window, name, *args)
-
-    def go_home(self):
-        self._invoke("showRoot")
-
-    def open_search(self):
-        self._invoke("openSearch")
-
-    def open_settings(self):
-        self._invoke("openSettings")
-
-    def open_item(self, item_id):
-        self.runner.run(lambda: self.library.item(item_id), self._open_loaded, lambda _e: None)
-
-    def _open_loaded(self, item):
-        if item and item.get("Id"):
-            entry = {"itemId": item["Id"], "itemType": item.get("Type", ""), "name": item.get("Name", "")}
-            self._invoke("openItem", Q_ARG("QVariant", entry))
-
     @Slot(str, float)
-    def play(self, item_id, start_ticks):
-        self.playSource(item_id, start_ticks, "")
+    def play(self, item_id, seconds):
+        self.player.play(item_id, seconds, "")
 
     @Slot(str, float, str)
-    def playSource(self, item_id, start_ticks, source_id):
-        if self._syncplay.active:
-            self._syncplay.set_queue(item_id, start_ticks)
-            return
-        self.player.play(item_id, start_ticks, source_id)
+    def playSource(self, item_id, seconds, source_id):
+        self.player.play(item_id, seconds, source_id)
 
     @Slot(str)
     def notifyChanged(self, item_id):
@@ -405,7 +299,6 @@ class AppController(QObject):
 
     def shutdown(self):
         self.gamepad.stop()
-        self.remote_socket.stop()
         self._trailers.shutdown()
         self._inhibitor.release_all()
         self.player.shutdown()

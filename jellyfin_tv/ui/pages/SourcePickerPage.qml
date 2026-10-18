@@ -46,7 +46,7 @@ FocusScope {
 
     Text {
         anchors { left: heading.right; leftMargin: 24; baseline: heading.baseline }
-        text: !page.details ? "" : page.details.name + (page.details.sourcesLoading ? "" : "   ·   " + list.count + " versions, best first")
+        text: !page.details ? "" : page.details.name + (page.details.sourcesLoading ? "" : "   ·   " + list.count + " versions in your AIOStreams order")
         color: Theme.textDim
         font.pixelSize: Theme.fontBody
     }
@@ -86,7 +86,7 @@ FocusScope {
                 y: 18
                 spacing: 12
                 Repeater {
-                    model: [row.modelData.resolution, row.modelData.hdr, row.modelData.codec, row.modelData.audio, row.modelData.size].filter(function (p) { return p && p.length > 0 })
+                    model: [row.modelData.resolution, row.modelData.hdr, row.modelData.codec, row.modelData.audio, row.modelData.size, row.modelData.service, row.modelData.languages].filter(function (p) { return p && p.length > 0 })
                     delegate: Rectangle {
                         required property string modelData
                         height: 36
@@ -116,7 +116,7 @@ FocusScope {
             Text {
                 id: check
                 anchors { right: parent.right; rightMargin: 28; verticalCenter: parent.verticalCenter }
-                text: row.modelData.selected ? "✓ Selected" : (row.index === 0 ? "Best" : "")
+                text: row.modelData.selected ? "✓ Selected" : (row.index === 0 ? "Top" : "")
                 color: row.current ? Theme.focusText : Theme.accent
                 font.pixelSize: Theme.fontBody
                 font.bold: true

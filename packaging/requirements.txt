@@ -1,5 +1,4 @@
 keyring>=24
 requests
 PySide6>=6.5; sys_platform != "linux"
-websocket-client
 yt-dlp

@@ -4,53 +4,12 @@ local function uosc(command)
     mp.commandv("script-binding", "uosc/" .. command)
 end
 
-local trickplay = false
-local pending = nil
-local commit_timer = nil
-local SCRUB_COMMIT_S = 0.8
-
-mp.register_script_message("jftv-trickplay", function(width)
-    trickplay = (tonumber(width) or 0) > 0
-end)
-
-local function commit()
-    if pending then
-        mp.commandv("seek", tostring(pending), "absolute")
-        pending = nil
-        mp.commandv("script-message-to", "thumbfast", "clear")
-    end
-end
-
 local function seek(seconds)
-    if not trickplay then
-        mp.commandv("seek", tostring(seconds))
-        uosc("flash-timeline")
-        return
-    end
-    local duration = mp.get_property_number("duration") or 0
-    local base = pending or mp.get_property_number("time-pos") or 0
-    pending = math.max(0, math.min(duration > 0 and duration - 1 or base + seconds, base + seconds))
+    mp.commandv("seek", tostring(seconds))
     uosc("flash-timeline")
-    mp.commandv("script-message-to", "thumbfast", "jftv-scrub", tostring(pending))
-    if commit_timer then
-        commit_timer:kill()
-    end
-    commit_timer = mp.add_timeout(SCRUB_COMMIT_S, commit)
 end
-
-mp.register_event("end-file", function()
-    pending = nil
-    trickplay = false
-end)
 
 local function toggle_pause()
-    if pending then
-        if commit_timer then
-            commit_timer:kill()
-        end
-        commit()
-        return
-    end
     mp.command("cycle pause")
     uosc("flash-timeline")
 end

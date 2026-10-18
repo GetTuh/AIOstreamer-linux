@@ -148,10 +148,6 @@ class TrailerPreview(QObject):
 
     def _find(self, item_id):
         found = self._library.trailers(item_id)
-        if found["local"]:
-            session = self._library.session
-            url = session.url("Videos/%s/stream" % found["local"][0], static="true", ApiKey=session.token)
-            return {"video": url, "audio": "", "muxed": True}
         if self._resolver.available:
             fallback = search_url(found["title"], found.get("year"))
             for url in found["remote"] + ([fallback] if fallback else []):

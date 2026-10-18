@@ -39,11 +39,9 @@ class Settings(QObject):
         "upnext_seconds": 10,
         "mpv_extra": "",
         "max_resolution": 0,
-        "prefer_hdr": True,
-        "max_bitrate": 40,
+        "max_bitrate": 0,
         "player_ui": "overlay",
         "audio_output": "auto",
-        "remote_control": True,
         "skip_segments": "ask",
         "trailer_previews": "muted",
         "gamepad": True,
@@ -102,11 +100,9 @@ class Settings(QObject):
     autoplayNext = _setting(bool, "autoplay_next", changed)
     upNextSeconds = _setting(int, "upnext_seconds", changed)
     maxResolution = _setting(int, "max_resolution", changed)
-    preferHdr = _setting(bool, "prefer_hdr", changed)
     maxBitrate = _setting(int, "max_bitrate", changed)
     playerUi = _setting(str, "player_ui", changed)
     audioOutput = _setting(str, "audio_output", changed)
-    remoteControl = _setting(bool, "remote_control", changed)
     skipSegments = _setting(str, "skip_segments", changed)
     trailerPreviews = _setting(str, "trailer_previews", changed)
     gamepad = _setting(bool, "gamepad", changed)

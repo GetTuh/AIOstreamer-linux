@@ -59,7 +59,7 @@ def main(argv=None):
     AppController.register_types()
     engine = QQmlApplicationEngine()
     controller = AppController(settings, kirigami_available(engine))
-    engine.addImageProvider(PROVIDER_ID, ImageProvider(controller.session, cache_dir()))
+    engine.addImageProvider(PROVIDER_ID, ImageProvider(cache_dir()))
     engine.rootContext().setContextProperty("app", controller)
     engine.rootContext().setContextProperty("startWindowed", args.windowed)
     engine.load(QUrl.fromLocalFile(str(UI_DIR / "Main.qml")))

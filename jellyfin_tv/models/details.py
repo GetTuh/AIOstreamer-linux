@@ -1,13 +1,13 @@
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
+from jellyfin_tv.api import meta as m
 from jellyfin_tv.api.images import image_source
-from jellyfin_tv.models.items import TICKS, episode_label, progress_for, subtitle_for
 from jellyfin_tv.models.services import services
-from jellyfin_tv.models.sources import describe, preferred_source_id, remember_source, sort_sources
+from jellyfin_tv.models.sources import describe, find, pick, remember, short_label, stream_id
 
 
-def format_duration(ticks):
-    seconds = int((ticks or 0) / TICKS)
+def format_duration(seconds):
+    seconds = int(seconds or 0)
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
@@ -15,17 +15,10 @@ def format_duration(ticks):
     return "%d:%02d" % (minutes, secs)
 
 
-def format_runtime(ticks):
-    minutes = int((ticks or 0) / TICKS / 60)
-    if not minutes:
-        return ""
-    hours, mins = divmod(minutes, 60)
-    return "%dh %dm" % (hours, mins) if hours else "%dm" % mins
-
-
 class DetailsModel(QObject):
     changed = Signal()
     playRequested = Signal(float, str)
+    userDataChanged = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,6 +31,11 @@ class DetailsModel(QObject):
         self._selected = ""
         self._sources_loading = False
         self._pending_play = None
+        self._series_played = False
+
+    @property
+    def _history(self):
+        return services.library.history
 
     @Slot()
     def reload(self):
@@ -46,6 +44,10 @@ class DetailsModel(QObject):
         self._generation += 1
         generation = self._generation
         item_id = self._id
+        if not self._item:
+            cached = services.library.peek_item(item_id)
+            if cached:
+                self._item = cached
         self._loading = True
         self.changed.emit()
         services.runner.run(
@@ -61,10 +63,13 @@ class DetailsModel(QObject):
         self._sources = []
         self._selected = ""
         self._pending_play = None
-        self._sources_loading = bool(value)
+        self._series_played = False
+        info = services.library.known(value) if value else {}
+        self._sources_loading = bool(value) and info.get("type") in ("Movie", "Episode")
         self.changed.emit()
         self.reload()
-        self._load_sources()
+        if self._sources_loading:
+            self._load_sources(dict(info, id=value))
 
     def _loaded(self, item):
         self._item = item or {}
@@ -73,22 +78,46 @@ class DetailsModel(QObject):
         if not self.playable:
             self._sources_loading = False
             self._pending_play = None
+        elif not self._sources and not self._sources_loading:
+            self._sources_loading = True
+            self._load_sources(self._item)
+        if self._item.get("type") == "Series":
+            self._check_series_played()
         self._rank()
         self.changed.emit()
 
-    def _load_sources(self):
-        item_id = self._id
-        if not item_id:
-            return
+    def _check_series_played(self):
+        item = self._item
+        history = self._history
+
+        def compute():
+            _show, episodes = services.library.series(item["id"], item.get("stremioType") or "series")
+            aired = [e for e in episodes if e.get("season") not in (0, None) and m.released(e)]
+            return bool(aired) and all(history.watched(e["id"]) for e in aired)
+
+        services.runner.run(compute, self._series_checked, lambda _e: None)
+
+    def _series_checked(self, played):
+        self._series_played = played
+        self.changed.emit()
+
+    def _load_sources(self, item):
+        item_id = item["id"]
         services.runner.run(
-            lambda: services.library.sources(item_id),
+            lambda: services.library.streams(item),
             lambda sources: item_id == self._id and self._sources_loaded(sources),
-            lambda _e: item_id == self._id and self._sources_loaded([]))
+            lambda exc: item_id == self._id and self._sources_failed(exc))
 
     def _rank(self):
-        original = self._item.get("OriginalLanguage") or ""
-        self._sources = sort_sources(self._sources, original)
-        self._selected = preferred_source_id(self._id, self._sources, original)
+        if not self._sources:
+            return
+        if not find(self._sources, self._selected):
+            chosen = pick(self._sources, self._item or {"id": self._id}, self._item.get("runtime", 0))
+            self._selected = stream_id(chosen) if chosen else ""
+
+    def _sources_failed(self, exc):
+        self._error = "" if self._item else str(exc)
+        self._sources_loaded([])
 
     def _sources_loaded(self, sources):
         self._sources_loading = False
@@ -96,16 +125,28 @@ class DetailsModel(QObject):
         self._rank()
         pending, self._pending_play = self._pending_play, None
         self.changed.emit()
-        if pending is not None:
+        if pending is not None and self._sources:
             self.playRequested.emit(pending, self._selected)
 
+    @Slot()
+    def refreshSources(self):
+        if not self.playable or self._sources_loading:
+            return
+        item = self._item
+        self._sources_loading = True
+        self.changed.emit()
+        services.runner.run(
+            lambda: services.library.streams(item, fresh=True),
+            lambda sources: item.get("id") == self._id and self._sources_loaded(sources),
+            lambda exc: item.get("id") == self._id and self._sources_failed(exc))
+
     @Slot(float)
-    def play(self, start_ticks):
+    def play(self, seconds):
         if self._sources_loading:
-            self._pending_play = start_ticks
+            self._pending_play = seconds
             self.changed.emit()
             return
-        self.playRequested.emit(start_ticks, self._selected)
+        self.playRequested.emit(seconds, self._selected)
 
     @Property(bool, notify=changed)
     def playPending(self):
@@ -117,7 +158,8 @@ class DetailsModel(QObject):
 
     def _failed(self, exc):
         self._loading = False
-        self._error = str(exc) or "Could not load item"
+        if not self._item:
+            self._error = str(exc) or "Could not load this title"
         self.changed.emit()
 
     @property
@@ -125,10 +167,8 @@ class DetailsModel(QObject):
         return self._item
 
     def _get(self, key, default=None):
-        return self._item.get(key, default)
-
-    def _user(self, key, default=None):
-        return (self._item.get("UserData") or {}).get(key, default)
+        value = self._item.get(key)
+        return default if value is None else value
 
     @Property(bool, notify=changed)
     def loading(self):
@@ -142,56 +182,55 @@ class DetailsModel(QObject):
     def error(self):
         return self._error
 
-    def _get_id(self):
-        return self._id
-
-    itemId = Property(str, _get_id, _set_id, notify=changed)
+    itemId = Property(str, lambda self: self._id, _set_id, notify=changed)
 
     @Property(str, notify=changed)
     def itemType(self):
-        return self._get("Type", "")
+        return self._get("type", "")
+
+    @Property(str, notify=changed)
+    def stremioType(self):
+        return self._get("stremioType", "")
 
     @Property(str, notify=changed)
     def name(self):
-        return self._get("Name", "")
+        return self._get("name", "")
 
     @Property(str, notify=changed)
     def seriesName(self):
-        return self._get("SeriesName", "")
+        return self._get("seriesName", "")
 
     @Property(str, notify=changed)
     def episodeLabel(self):
-        return episode_label(self._item) if self._get("Type") == "Episode" else ""
+        return m.episode_label(self._item) if self._get("type") == "Episode" else ""
 
     @Property(str, notify=changed)
     def overview(self):
-        return self._get("Overview", "") or ""
+        return self._get("overview", "")
 
     @Property(str, notify=changed)
     def tagline(self):
-        taglines = self._get("Taglines") or []
-        return taglines[0] if taglines else ""
+        return ""
 
     @Property(str, notify=changed)
     def year(self):
-        return subtitle_for(self._item) if self._get("Type") == "Series" else str(self._get("ProductionYear") or "")
+        return self._get("year", "")
 
     @Property(str, notify=changed)
     def runtime(self):
-        return format_runtime(self._get("RunTimeTicks"))
+        return m.runtime_text(self._get("runtime", 0))
 
     @Property(str, notify=changed)
     def officialRating(self):
-        return self._get("OfficialRating", "") or ""
+        return ""
 
     @Property(str, notify=changed)
     def communityRating(self):
-        rating = self._get("CommunityRating")
-        return "%.1f" % rating if rating else ""
+        return self._get("rating", "")
 
     @Property(str, notify=changed)
     def genres(self):
-        return " · ".join((self._get("Genres") or [])[:3])
+        return " · ".join(self._get("genres", [])[:3])
 
     @Property(str, notify=changed)
     def backdrop(self):
@@ -206,24 +245,26 @@ class DetailsModel(QObject):
         return image_source(self._item, "poster") if self._item else ""
 
     @Property(float, notify=changed)
-    def resumeTicks(self):
-        return float(self._user("PlaybackPositionTicks") or 0)
+    def resumeSeconds(self):
+        return float(self._history.progress(self._id)[0]) if self._history else 0.0
 
     @Property(str, notify=changed)
     def resumeText(self):
-        return format_duration(self._user("PlaybackPositionTicks"))
+        return format_duration(self.resumeSeconds)
 
     @Property(float, notify=changed)
     def progress(self):
-        return progress_for(self._item)
+        return self._history.fraction(self._id) if self._history else 0.0
 
     @Property(bool, notify=changed)
     def played(self):
-        return bool(self._user("Played"))
+        if self._get("type") == "Series":
+            return self._series_played
+        return bool(self._history and self._history.watched(self._id))
 
     @Property(bool, notify=changed)
     def playable(self):
-        return self._get("Type") in ("Movie", "Episode", "Video", "MusicVideo") and not self._get("IsFolder")
+        return bool(self._item) and self._get("type") in ("Movie", "Episode")
 
     @Property(int, notify=changed)
     def sourceCount(self):
@@ -231,38 +272,43 @@ class DetailsModel(QObject):
 
     @Property(str, notify=changed)
     def seriesId(self):
-        return self._get("SeriesId", "") or ""
+        return self._get("seriesId", "")
 
     @Property(bool, notify=changed)
     def favorite(self):
-        return bool(self._user("IsFavorite"))
+        target = self._get("seriesId") or self._id
+        return bool(self._history and self._history.favorite(target))
 
-    def _update_user(self, data):
-        if data and self._item:
-            user = dict(self._item.get("UserData") or {})
-            user.update({k: v for k, v in data.items() if k in ("Played", "IsFavorite", "PlaybackPositionTicks", "PlayedPercentage", "UnplayedItemCount")})
-            self._item["UserData"] = user
-            self.changed.emit()
-            self.userDataChanged.emit(self._id)
-
-    userDataChanged = Signal(str)
+    def _user_updated(self, _value):
+        self.changed.emit()
+        self.userDataChanged.emit(self._id)
 
     @Slot()
     def togglePlayed(self):
-        item_id, value = self._id, not self.played
-        services.runner.run(lambda: services.library.set_played(item_id, value), self._update_user, lambda _e: None)
+        if not self._item:
+            return
+        item, value = dict(self._item), not self.played
+        if item.get("type") == "Series":
+            self._series_played = value
+        services.runner.run(lambda: services.library.set_watched(item, value), self._user_updated, lambda _e: None)
 
     @Slot()
     def toggleFavorite(self):
-        item_id, value = self._id, not self.favorite
-        services.runner.run(lambda: services.library.set_favorite(item_id, value), self._update_user, lambda _e: None)
+        if not self._item:
+            return
+        item = dict(self._item)
+        if item.get("type") == "Episode" and item.get("seriesId"):
+            item = {"id": item["seriesId"], "type": "Series", "stremioType": item.get("stremioType"), "name": item.get("seriesName"),
+                    "poster": item.get("poster"), "background": item.get("background"), "logo": item.get("logo")}
+        value = not self.favorite
+        services.runner.run(lambda: services.library.set_favorite(item, value), self._user_updated, lambda _e: None)
 
     @Property("QVariantList", notify=changed)
     def sources(self):
         out = []
         for source in self._sources:
             info = describe(source)
-            info["selected"] = source.get("Id") == self._selected
+            info["selected"] = info["id"] == self._selected
             out.append(info)
         return out
 
@@ -272,15 +318,13 @@ class DetailsModel(QObject):
 
     @Property(str, notify=changed)
     def selectedSourceLabel(self):
-        for source in self._sources:
-            if source.get("Id") == self._selected:
-                info = describe(source)
-                return " · ".join(p for p in (info["resolution"], info["hdr"], info["codec"], info["audio"], info["size"]) if p)
-        return ""
+        stream = find(self._sources, self._selected)
+        return short_label(stream) if stream else ""
 
     @Slot(str)
     def selectSource(self, source_id):
-        if source_id and source_id != self._selected:
+        stream = find(self._sources, source_id)
+        if stream and source_id != self._selected:
             self._selected = source_id
-            remember_source(self._id, source_id)
+            remember(self._item or {"id": self._id}, stream)
             self.changed.emit()

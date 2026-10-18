@@ -3,8 +3,11 @@ from pathlib import Path
 
 from jellyfin_tv.tests.helpers import FakeSettings, SyncRunner, app
 from jellyfin_tv.player.mpv_runner import DEFAULT_OPTIONS, build_options, parse_overrides
-from jellyfin_tv.player.playback import PlaybackController, media_title, up_next_at
-from jellyfin_tv.player.reporter import PlaybackReporter
+import tempfile
+
+from jellyfin_tv.api.history import WatchState
+from jellyfin_tv.models.services import services
+from jellyfin_tv.player.playback import PlaybackController, media_title, pick_subtitles, proxy_headers, up_next_at, wants_external
 
 
 class MpvOptionsTest(unittest.TestCase):
@@ -87,88 +90,18 @@ class MpvOptionsTest(unittest.TestCase):
         self.assertEqual(parse_overrides("a=1\n\n b = 2 \nc"), {"a": "1", "b": "2", "c": "yes"})
 
 
-class FakeSession:
-    server = "http://serv.local:3020"
-    token = "TOKEN"
-    client = None
-
-    def url(self, path, **params):
-        from jellyfin_tv.api.session import Session
-        return Session.url(self, path, **params)
-
-
-class StreamUrlTest(unittest.TestCase):
-    def setUp(self):
-        app()
-        self.controller = PlaybackController(SyncRunner(), FakeSession(), None, FakeSettings())
-
-    def test_server_stream(self):
-        url, method = self.controller._stream_url("item", {"Id": "src", "Protocol": "File", "Path": "/remux/x", "SupportsDirectStream": True}, "psid")
-        self.assertTrue(url.startswith("http://serv.local:3020/Videos/item/stream?"))
-        self.assertIn("MediaSourceId=src", url)
-        self.assertIn("ApiKey=TOKEN", url)
-        self.assertIn("static=true", url)
-        self.assertEqual(method, "DirectPlay")
-
-    def test_foreign_http_path_gets_no_token(self):
-        url, _ = self.controller._stream_url("item", {"Id": "s", "Protocol": "Http", "Path": "https://cdn.example/v.mkv"}, "p")
-        self.assertEqual(url, "https://cdn.example/v.mkv")
-
-    def test_same_origin_subtitle_gets_token_once(self):
-        subs = self.controller._external_subtitles({"MediaStreams": [
-            {"Type": "Subtitle", "IsExternal": True, "DeliveryUrl": "/Videos/x/Subtitles/4/0/Stream.vtt", "Language": "eng"},
-            {"Type": "Subtitle", "IsExternal": True, "DeliveryUrl": "/Videos/x/Subtitles/5/0/Stream.vtt?ApiKey=abc"},
-            {"Type": "Subtitle", "IsExternal": True, "DeliveryUrl": "https://other.host/s.srt"},
-            {"Type": "Subtitle", "IsExternal": False},
-        ]})
-        self.assertEqual(len(subs), 3)
-        self.assertTrue(subs[0]["url"].endswith("Stream.vtt?ApiKey=TOKEN"))
-        self.assertEqual(subs[0]["lang"], "eng")
-        self.assertEqual(subs[1]["url"].lower().count("apikey="), 1)
-        self.assertEqual(subs[2]["url"], "https://other.host/s.srt")
-
-    def test_media_title(self):
-        self.assertEqual(media_title({"Type": "Episode", "SeriesName": "BB", "ParentIndexNumber": 2, "IndexNumber": 1, "Name": "737"}), "BB - S02E01 - 737")
-        self.assertEqual(media_title({"Type": "Movie", "Name": "Top Gun", "ProductionYear": 1986}), "Top Gun (1986)")
-
-
-class FakeClient:
-    def __init__(self):
-        self.calls = []
-
-    def post(self, path, json=None, params=None):
-        self.calls.append(({"Sessions/Playing": "playing", "Sessions/Playing/Progress": "progress",
-                            "Sessions/Playing/Stopped": "stop"}[path], json))
-
-
-class ReporterTest(unittest.TestCase):
-    def test_sequence_and_payload(self):
-        client = FakeClient()
-        reporter = PlaybackReporter(client, "item", "src", "psid")
-        reporter.progress(5, False)
-        reporter.start(10, False)
-        reporter.progress(20.5, True, "Pause")
-        reporter.stop(30, completed=True, runtime=3000)
-        reporter.flush(5)
-        kinds = [c[0] for c in client.calls]
-        self.assertEqual(kinds, ["playing", "progress", "stop"])
-        self.assertEqual(client.calls[0][1]["PositionTicks"], 100_000_000)
-        self.assertEqual(client.calls[1][1]["EventName"], "Pause")
-        self.assertTrue(client.calls[1][1]["IsPaused"])
-        self.assertEqual(client.calls[2][1]["PositionTicks"], 30_000_000_000)
-        self.assertEqual(client.calls[2][1]["MediaSourceId"], "src")
-        self.assertEqual(client.calls[2][1]["PlaySessionId"], "psid")
-
-    def test_no_stop_without_start(self):
-        client = FakeClient()
-        reporter = PlaybackReporter(client, "item", "src", "psid")
-        reporter.stop(30)
-        self.assertEqual(client.calls, [])
+def stream(item_id, res, group):
+    name = "Show.S01E0%s.%s.WEB-DL.mkv" % (item_id[-1], res)
+    return {"url": "https://cdn/%s/%s" % (item_id, res), "name": res,
+            "behaviorHints": {"filename": name, "bingeGroup": group, "videoSize": 2_000_000_000},
+            "streamData": {"id": "%s-%s" % (res, item_id), "type": "debrid", "parsedFile": {"resolution": res}}}
 
 
 class FakePlayer:
     def __init__(self):
         self.calls = []
+        self.tracks = []
+        self.subs = []
 
     def show_up_next(self, series, title, seconds, autoplay, accent=""):
         self.calls.append(("show", title, seconds, autoplay))
@@ -179,11 +112,14 @@ class FakePlayer:
     def set_versions(self, versions):
         self.versions = versions
 
-    def set_segments(self, segments):
-        self.calls.append(("segments", segments))
-
     def command(self, *args):
         self.calls.append(("command",) + args)
+
+    def get(self, name, default=None):
+        return self.tracks if name == "track-list" else default
+
+    def add_subtitle(self, url, title="", lang=""):
+        self.subs.append((url, lang))
 
     def load_next(self, url, title, start, alang=None):
         self.calls.append(("load", url, title, start))
@@ -193,46 +129,78 @@ class FakePlayer:
         self.calls.append(("quit",))
 
     def kinds(self):
-        return [c[0] for c in self.calls if c[0] not in ("segments", "command")]
+        return [c[0] for c in self.calls if c[0] != "command"]
 
 
 class FakeLibrary:
     EPISODES = ["e1", "e2", "e3"]
 
+    def __init__(self):
+        self.subtitle_calls = 0
+
     def item(self, item_id):
         number = self.EPISODES.index(item_id) + 1
-        return {"Id": item_id, "Type": "Episode", "SeriesId": "show", "SeriesName": "Show",
-                "ParentIndexNumber": 1, "IndexNumber": number, "OriginalLanguage": "ja", "Name": "Ep %d" % number, "RunTimeTicks": 1000 * 10_000_000}
+        return {"id": item_id, "type": "Episode", "stremioType": "series", "seriesId": "show", "seriesName": "Show",
+                "season": 1, "episode": number, "name": "Ep %d" % number, "runtime": 1000}
 
-    def playback_info(self, item_id, source_id=None):
-        return {"PlaySessionId": "ps-" + item_id, "MediaSources": [
-            {"Id": "src-" + item_id, "Name": "2160p", "Protocol": "File", "SupportsDirectStream": True},
-            {"Id": "alt-" + item_id, "Name": "1080p", "Protocol": "File", "SupportsDirectStream": True},
-        ]}
+    def streams(self, item, fresh=False):
+        return [stream(item["id"], "2160p", "aio|2160p|A"), stream(item["id"], "1080p", "aio|1080p|B")]
 
-    def next_episode(self, series_id, item_id):
-        index = self.EPISODES.index(item_id) + 1
+    def next_episode(self, item):
+        index = self.EPISODES.index(item["id"]) + 1
         return self.item(self.EPISODES[index]) if index < len(self.EPISODES) else None
 
-    segments_by_item = {}
+    def subtitles(self, item, stream=None):
+        self.subtitle_calls += 1
+        return [{"url": "https://subs/%d" % i, "lang": lang} for i, lang in enumerate(["eng", "eng", "eng", "ger", "pob"])]
 
-    def segments(self, item_id):
-        return self.segments_by_item.get(item_id, [])
+
+class FakeSession:
+    def __init__(self):
+        self.history = WatchState(tempfile.mkdtemp(prefix="jftv-hist-") + "/state.json")
 
 
-class ReportingSession(FakeSession):
-    client = FakeClient()
+class HelpersTest(unittest.TestCase):
+    def test_media_title(self):
+        self.assertEqual(media_title({"type": "Episode", "seriesName": "BB", "season": 2, "episode": 1, "name": "737"}), "BB - S02E01 - 737")
+        self.assertEqual(media_title({"type": "Movie", "name": "Top Gun", "year": "1986"}), "Top Gun (1986)")
+        self.assertEqual(media_title({"type": "Movie", "name": "Dune"}), "Dune")
+
+    def test_proxy_headers(self):
+        self.assertEqual(proxy_headers({}), "")
+        hinted = {"behaviorHints": {"proxyHeaders": {"request": {"Referer": "https://a", "X-A": "b,c"}}}}
+        self.assertEqual(proxy_headers(hinted), "Referer: https://a,X-A: b\\,c")
+
+    def test_pick_subtitles_caps_per_language(self):
+        subs = [{"url": "u%d" % i, "lang": lang} for i, lang in enumerate(["eng", "en", "eng", "ger", "fre", "eng"])]
+        picked = pick_subtitles(subs, ["eng", "ger"])
+        self.assertEqual([s["url"] for s in picked], ["u0", "u1", "u3"])
+
+    def test_wants_external(self):
+        internal = [{"type": "sub", "lang": "eng", "id": 1}]
+        self.assertFalse(wants_external([], ["eng"], "off", None))
+        self.assertFalse(wants_external([], [], "auto", None))
+        self.assertFalse(wants_external([], ["eng"], "auto", "eng"))
+        self.assertTrue(wants_external([], ["eng"], "always", "eng"))
+        self.assertTrue(wants_external([], ["eng"], "auto", "jpn"))
+        self.assertFalse(wants_external(internal, ["eng"], "auto", "jpn"))
 
 
 class UpNextTest(unittest.TestCase):
     def setUp(self):
         app()
         self.settings = FakeSettings(autoplay_next=True, upnext_seconds=10)
-        self.controller = PlaybackController(SyncRunner(), ReportingSession(), FakeLibrary(), self.settings)
+        services.settings = self.settings
+        self.session = FakeSession()
+        self.library = FakeLibrary()
+        self.controller = PlaybackController(SyncRunner(), self.session, self.library, self.settings)
         self.advanced = []
         self.controller.playbackAdvanced.connect(self.advanced.append)
         self.player = FakePlayer()
         self.state = self.start("e1")
+
+    def tearDown(self):
+        services.settings = None
 
     def start(self, item_id):
         state = self.controller._resolve(item_id, 0, None)
@@ -242,71 +210,72 @@ class UpNextTest(unittest.TestCase):
         self.controller._launched(state)
         return state
 
-    def test_falls_back_to_item_sources_without_playback_info(self):
-        self.controller._library.playback_info = lambda item_id, source_id=None: None
-        self.controller._library.sources = lambda item_id: [{"Id": "fallback", "Protocol": "File", "SupportsDirectStream": True}]
-        state = self.controller._resolve("e2", 0, None)
-        self.assertIn("MediaSourceId=fallback", state["url"])
-        self.assertNotIn("PlaySessionId", state["url"])
+    def test_first_version_in_aiostreams_order_by_default(self):
+        self.assertEqual(self.state["url"], "https://cdn/e1/2160p")
 
-    def test_switch_version_keeps_position_and_remembers(self):
+    def test_default_pick_is_not_sticky(self):
+        self.settings.values["max_resolution"] = 1080
+        self.assertEqual(self.controller._resolve("e2", 0, None)["url"], "https://cdn/e2/1080p")
+
+    def test_resolution_cap_skips_to_first_fitting(self):
+        self.settings.values["max_resolution"] = 1080
+        state = self.controller._resolve("e3", 0, None)
+        self.assertEqual(state["url"], "https://cdn/e3/1080p")
+
+    def test_switch_version_keeps_position_and_follows_into_next_episode(self):
         self.controller._on_position(612.5)
         self.controller._on_file_loaded()
-        self.assertEqual([v["id"] for v in self.player.versions], ["src-e1", "alt-e1"])
+        self.assertEqual([v["id"] for v in self.player.versions], ["2160p-e1", "1080p-e1"])
         self.assertTrue(self.player.versions[0]["active"])
         for _ in range(3):
-            self.controller._on_message(["jftv-version", "alt-e1"])
+            self.controller._on_message(["jftv-version", "1080p-e1"])
         loads = [c for c in self.player.calls if c[0] == "load"]
         self.assertEqual(len(loads), 1)
-        self.assertIn("MediaSourceId=alt-e1", loads[0][1])
+        self.assertEqual(loads[0][1], "https://cdn/e1/1080p")
         self.assertEqual(loads[0][3], 612.5)
-        self.assertEqual(self.controller._active["source"]["Id"], "alt-e1")
         self.assertEqual(self.controller._active["item_id"], "e1")
-        self.assertEqual(self.settings.sources["e1"], "alt-e1")
         self.controller._on_end_file("stop")
         self.assertNotIn("quit", self.player.kinds())
         self.controller._on_file_loaded()
         self.assertTrue(self.player.versions[1]["active"])
+        self.controller._active["playing"] = True
+        self.controller._on_position(980)
+        self.controller._on_end_file("eof")
+        self.assertEqual(self.player.calls[-1][1], "https://cdn/e2/1080p")
 
-    def test_stream_index_maps_to_mpv_track(self):
-        self.controller._active["source"]["MediaStreams"] = [
-            {"Type": "Video", "Index": 0}, {"Type": "Audio", "Index": 1}, {"Type": "Audio", "Index": 2},
-            {"Type": "Subtitle", "Index": 3}, {"Type": "Subtitle", "Index": 4, "IsExternal": True}, {"Type": "Subtitle", "Index": 5},
-        ]
-        self.controller.set_audio_index(2)
-        self.controller.set_subtitle_index(5)
-        self.controller.set_subtitle_index(4)
-        self.controller.set_subtitle_index(-1)
-        self.controller.set_audio_index(9)
-        commands = [c[1:] for c in self.player.calls if c[0] == "command"]
-        self.assertEqual(commands, [("set_property", "aid", 2), ("set_property", "sid", 2), ("set_property", "sid", 3), ("set_property", "sid", "no")])
+    def test_progress_recorded_and_finished_marks_watched(self):
+        history = self.session.history
+        self.controller._on_position(300)
+        self.controller._tick()
+        self.assertEqual(history.progress("e1")[0], 300)
+        self.controller._on_paused(True)
+        self.controller._on_position(420)
+        self.controller._on_paused(False)
+        self.controller._on_paused(True)
+        self.assertEqual(history.progress("e1")[0], 420)
+        self.controller._on_position(980)
+        self.controller._on_end_file("eof")
+        self.assertTrue(history.watched("e1"))
+        self.assertEqual(history.progress("e1"), (0.0, 0.0))
+        self.assertEqual(self.controller._active["item_id"], "e2")
+
+    def test_addon_subtitles_only_when_no_internal_match(self):
+        self.player.tracks = [{"type": "audio", "id": 1, "lang": "jpn", "selected": True}]
+        self.controller._on_file_loaded()
+        self.assertEqual(self.player.subs, [("https://subs/0", "eng"), ("https://subs/1", "eng")])
+        self.player.subs = []
+        self.player.tracks.append({"type": "sub", "id": 1, "lang": "eng"})
+        self.controller._on_file_loaded()
+        self.assertEqual(self.player.subs, [])
+        self.assertEqual(self.library.subtitle_calls, 1)
 
     def test_play_now_replaces_current_item_in_same_player(self):
-        self.controller.play_now("e3", 120 * 10_000_000.0, "")
+        self.controller.play_now("e3", 120.0, "")
         loads = [c for c in self.player.calls if c[0] == "load"]
         self.assertEqual(len(loads), 1)
         self.assertEqual(loads[0][3], 120.0)
         self.assertEqual(self.controller._active["item_id"], "e3")
         self.assertEqual(self.advanced, ["e1"])
-
-    def test_segments_sent_after_load_and_outro_drives_up_next(self):
-        FakeLibrary.segments_by_item = {"e2": [{"kind": "Intro", "start": 30.0, "end": 90.0}, {"kind": "Outro", "start": 900.0, "end": 1000.0}]}
-        try:
-            self.controller._on_position(980)
-            self.controller._on_end_file("eof")
-            self.assertNotIn("segments", self.player.kinds())
-            self.controller._on_file_loaded()
-            sent = [c[1] for c in self.player.calls if c[0] == "segments"]
-            self.assertEqual(sent[-1][0]["kind"], "Intro")
-            active = self.controller._active
-            self.assertEqual(active["outro"], 900.0)
-            active["playing"] = True
-            self.controller._on_position(899)
-            self.assertEqual(self.player.kinds().count("show"), 1)
-            self.controller._on_position(901)
-            self.assertEqual(self.player.kinds().count("show"), 2)
-        finally:
-            FakeLibrary.segments_by_item = {}
 
     def test_skip_script_options(self):
         options = build_options(FakeSettings(skip_segments="auto"), "T", theme={"accent": "#ff8800"})
@@ -329,7 +298,7 @@ class UpNextTest(unittest.TestCase):
         self.assertEqual(self.player.calls, [("show", "S1:E2 · Ep 2", 10, True)])
         self.controller._on_message(["jftv-upnext-play"])
         self.assertEqual(self.player.kinds(), ["show", "load"])
-        self.assertIn("MediaSourceId=src-e2", self.player.calls[1][1])
+        self.assertEqual(self.player.calls[-1][1], "https://cdn/e2/2160p")
         self.assertEqual(self.controller._active["item_id"], "e2")
         self.assertEqual(self.advanced, ["e1"])
         self.controller._on_end_file("stop")
@@ -338,14 +307,11 @@ class UpNextTest(unittest.TestCase):
         self.controller._on_end_file("stop")
         self.assertEqual(self.player.kinds()[-1], "quit")
 
-    def test_next_episode_gets_original_audio_language(self):
-        self.settings.values["audio_language"] = "original"
+    def test_next_episode_resumes_from_history(self):
+        self.session.history.record(self.library.item("e2"), 333, 1000)
         self.controller._on_position(980)
         self.controller._on_end_file("eof")
-        self.assertEqual(self.player.alang, "jpn")
-        self.assertIn("alang", build_options(self.settings, "T", original="ja"))
-        self.assertEqual(build_options(self.settings, "T", original="ja")["alang"], "jpn")
-        self.assertNotIn("alang", build_options(self.settings, "T", original=""))
+        self.assertEqual(self.player.calls[-1][3], 333)
 
     def test_dismissed_then_eof_returns_to_app(self):
         self.controller._on_position(980)
@@ -386,6 +352,8 @@ class UpNextTest(unittest.TestCase):
         self.controller._on_end_file("eof")
         self.assertEqual(self.player.kinds(), ["show", "load", "show", "load", "quit"])
         self.assertEqual(self.advanced, ["e1", "e2"])
+        for item_id in ("e1", "e2"):
+            self.assertTrue(self.session.history.watched(item_id))
 
 
 if __name__ == "__main__":
