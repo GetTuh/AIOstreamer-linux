@@ -43,11 +43,14 @@ def image_source(item, kind):
         chain = ("background", "thumbnail")
     else:
         chain = ("logo",)
+    urls = []
     for key in chain:
-        src = proxied(item.get(key) or "", kind)
-        if src:
-            return src
-    return ""
+        url = item.get(key) or ""
+        if url.startswith(("http://", "https://")) and url not in urls:
+            urls.append(url)
+    if not urls:
+        return ""
+    return "image://%s/%s/%s" % (PROVIDER_ID, kind, "/".join(encode_url(u) for u in urls))
 
 
 class _Response(QQuickImageResponse):
@@ -126,8 +129,21 @@ class ImageProvider(QQuickAsyncImageProvider):
         return sess
 
     def load(self, image_id, size):
-        _kind, encoded = image_id.split("/", 1)
-        url = decode_url(encoded)
+        _kind, *encoded = image_id.split("/")
+        error = None
+        for part in encoded:
+            try:
+                image = self._load_url(decode_url(part), size)
+            except Exception as exc:
+                error = exc
+                continue
+            if not image.isNull():
+                return image
+        if error is not None:
+            raise error
+        return QImage()
+
+    def _load_url(self, url, size):
         path = self.cache / (hashlib.sha1(url.encode()).hexdigest() + ".img")
         if not path.exists():
             failed = self._failed.get(url)
