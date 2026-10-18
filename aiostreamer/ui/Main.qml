@@ -57,6 +57,11 @@ ApplicationWindow {
         stack.push(settingsComponent)
     }
 
+    function openControls() {
+        if (!stack.currentItem || stack.currentItem.objectName !== "controlsPage")
+            stack.push(controlsComponent)
+    }
+
     function showRoot() {
         if (!app.ready)
             return
@@ -92,6 +97,9 @@ ApplicationWindow {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Backspace) {
                 event.accepted = true
                 window.goBack()
+            } else if (event.key === Qt.Key_F1) {
+                event.accepted = true
+                keysLegend.open()
             }
         }
     }
@@ -171,7 +179,13 @@ ApplicationWindow {
         id: settingsComponent
         SettingsPage {
             onAddAccount: stack.push(loginComponent)
+            onOpenControls: window.openControls()
         }
+    }
+
+    Component {
+        id: controlsComponent
+        ControlsPage {}
     }
 
     Rectangle {
@@ -200,6 +214,12 @@ ApplicationWindow {
         acceptText: "Quit"
         rejectText: "Cancel"
         onAccepted: app.quit()
+        onClosed: stack.currentItem && stack.currentItem.forceActiveFocus()
+    }
+
+    KeysLegend {
+        id: keysLegend
+        onCustomize: window.openControls()
         onClosed: stack.currentItem && stack.currentItem.forceActiveFocus()
     }
 

@@ -3,7 +3,11 @@ from PySide6.QtCore import Property, QAbstractListModel, QByteArray, QModelIndex
 from aiostreamer.models.items import ItemListModel
 
 ROW_LIMIT = 24
-LOCAL_ROWS = ("resume", "nextup", "favorites")
+LOCAL_ROWS = ("resume", "nextup", "favorites", "recent")
+
+
+def is_library(catalog):
+    return catalog["type"] == "library" or "library" in ("%s %s" % (catalog["id"], catalog["title"])).lower()
 
 
 class HomeModel(QAbstractListModel):
@@ -61,9 +65,11 @@ class HomeModel(QAbstractListModel):
             self._row("resume", "Continue Watching", lambda s, n: self._wrap(lib.resume(ROW_LIMIT)), "thumb"),
             self._row("nextup", "Next Up", lambda s, n: self._wrap(lib.next_up(ROW_LIMIT)), "thumb"),
             self._row("favorites", "My List", lambda s, n: self._wrap(lib.favorites()), "poster"),
+            self._row("recent", "Recently Watched", lambda s, n: self._wrap(lib.recent(ROW_LIMIT)), "poster"),
         ]
         self.beginResetModel()
         self._rows = rows
+        self._catalogs = None
         self.endResetModel()
         self.countChanged.emit()
         for _, model in rows:
@@ -94,7 +100,7 @@ class HomeModel(QAbstractListModel):
             return
         self._catalogs = signature
         lib = self._library
-        rows = []
+        rows, last = [], []
         for c in catalogs:
             def fetch(s, n, c=c):
                 return lib.catalog(c["type"], c["id"], c["extra"], 0, ROW_LIMIT)
@@ -103,9 +109,10 @@ class HomeModel(QAbstractListModel):
                 items = lib.peek_catalog(c["type"], c["id"], c["extra"])
                 return (items, len(items)) if items else None
 
-            rows.append(self._row(c["key"], c["title"], fetch, "poster", peek))
+            (last if is_library(c) else rows).append(self._row(c["key"], c["title"], fetch, "poster", peek))
         entries = [self._catalog_entry(c) for c in catalogs]
         rows.append(self._row("catalogs", "Browse", lambda s, n, e=entries: self._wrap(e), "thumb"))
+        rows += last
         local = [r for r in self._rows if r[0] in LOCAL_ROWS]
         self.beginResetModel()
         self._rows = local + rows

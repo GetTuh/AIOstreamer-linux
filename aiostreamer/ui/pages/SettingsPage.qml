@@ -8,6 +8,7 @@ FocusScope {
     id: page
 
     signal addAccount()
+    signal openControls()
 
     readonly property var audioLanguages: [languages[0],
         { value: "original", text: "Original" },
@@ -273,7 +274,17 @@ FocusScope {
                 value: app.settings.gamepad
                 onPicked: (v) => app.settings.gamepad = v
                 KeyNavigation.up: trailerPreviews
+                KeyNavigation.down: keysButton
+                onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
+            }
+
+            TvButton {
+                id: keysButton
+                icon: "⌨"
+                text: "Keys and remote buttons"
+                KeyNavigation.up: gamepadRow
                 KeyNavigation.down: accountList.count > 0 ? accountList.itemAt(0) : addAccountButton
+                onClicked: page.openControls()
                 onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
             }
 
@@ -295,7 +306,7 @@ FocusScope {
                     icon: modelData.active ? "✓" : "●"
                     primary: modelData.active
                     text: modelData.username + "  ·  " + modelData.server.replace(/^https?:\/\//, "")
-                    KeyNavigation.up: index > 0 ? accountList.itemAt(index - 1) : gamepadRow
+                    KeyNavigation.up: index > 0 ? accountList.itemAt(index - 1) : keysButton
                     KeyNavigation.down: index < accountList.count - 1 ? accountList.itemAt(index + 1) : addAccountButton
                     onClicked: if (!modelData.active) app.switchAccount(modelData.key)
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
@@ -308,7 +319,7 @@ FocusScope {
                     id: addAccountButton
                     icon: "+"
                     text: "Add account"
-                    KeyNavigation.up: accountList.count > 0 ? accountList.itemAt(accountList.count - 1) : gamepadRow
+                    KeyNavigation.up: accountList.count > 0 ? accountList.itemAt(accountList.count - 1) : keysButton
                     KeyNavigation.right: clearCache
                     onClicked: page.addAccount()
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)

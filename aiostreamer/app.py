@@ -1,8 +1,8 @@
 import logging
 import time
 
-from PySide6.QtCore import Property, QEvent, QObject, QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QKeyEvent
+from PySide6.QtCore import Property, QObject, QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import qmlRegisterType
 
 from aiostreamer.api.library import Library
@@ -10,6 +10,7 @@ from aiostreamer.api.session import LoginError, Session
 from aiostreamer.api.tasks import TaskRunner
 from aiostreamer.gamepad import Gamepad
 from aiostreamer.inhibit import SleepInhibitor
+from aiostreamer.keys import KeyMap
 from aiostreamer.models.details import DetailsModel
 from aiostreamer.models.home import HomeModel
 from aiostreamer.models.items import LibraryModel, SearchModel
@@ -83,6 +84,7 @@ class AppController(QObject):
         self._inhibitor = SleepInhibitor(parent=self)
         self.player.playbackStarted.connect(lambda _id: self._trailers.stop())
         self._playback_ended_at = None
+        self._keys = KeyMap(settings, parent=self)
         self.gamepad = Gamepad(parent=self)
         self.gamepad.action.connect(self.gamepad_action)
 
@@ -95,6 +97,7 @@ class AppController(QObject):
 
     def attach_window(self, window):
         self._window = window
+        self._keys.attach(window)
 
     @Property(QObject, constant=True)
     def settings(self):
@@ -223,11 +226,12 @@ class AppController(QObject):
     def inhibitor(self):
         return self._inhibitor
 
+    @Property(QObject, constant=True)
+    def keys(self):
+        return self._keys
+
     def press(self, key, text=""):
-        if self._window is None:
-            return
-        for kind in (QEvent.KeyPress, QEvent.KeyRelease):
-            QGuiApplication.sendEvent(self._window, QKeyEvent(kind, key, Qt.NoModifier, text))
+        self._keys.press(key, text)
 
     def start_gamepad(self):
         return self.gamepad.start()

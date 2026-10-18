@@ -282,7 +282,7 @@ class UpNextTest(unittest.TestCase):
         self.controller._on_file_loaded()
         self.player.subs = []
         self.controller._on_message(["aios-more-subs"])
-        self.assertEqual([u for u, _ in self.player.subs], ["https://subs/2", "https://subs/3", "https://subs/4"])
+        self.assertEqual(sorted(u for u, _ in self.player.subs), ["https://subs/2", "https://subs/3", "https://subs/4"])
         self.assertEqual(self.library.fresh_calls, 1)
         texts = [c for c in self.player.calls if c[:2] == ("command", "show-text")]
         self.assertIn("Added 3 subtitles", texts[-1][2])

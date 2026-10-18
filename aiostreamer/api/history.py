@@ -113,6 +113,18 @@ class WatchState:
                 break
         return out
 
+    def recent(self, limit=24):
+        seen = {sid: (show.get("updated", 0), show["item"]) for sid, show in self._data["shows"].items() if show.get("item")}
+        stamps = dict(self._data["watched"])
+        for item_id, entry in self._data["progress"].items():
+            stamps[item_id] = max(stamps.get(item_id, 0), entry.get("updated", 0))
+        for item_id, stamp in stamps.items():
+            item = self._data["items"].get(item_id)
+            if item and item.get("type") != "Episode":
+                seen[item_id] = (stamp, item)
+        ordered = sorted(seen.values(), key=lambda entry: entry[0], reverse=True)
+        return [dict(item) for _, item in ordered[:limit]]
+
     def recent_shows(self, limit=24):
         shows = sorted(self._data["shows"].items(), key=lambda kv: kv[1].get("updated", 0), reverse=True)
         return [(series_id, dict(entry)) for series_id, entry in shows[:limit]]

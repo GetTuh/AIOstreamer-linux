@@ -95,6 +95,22 @@ class WatchStateTest(unittest.TestCase):
             state.record({"id": item_id, "type": "Episode" if item_id.startswith("s") else "Movie", "seriesId": "s" if item_id.startswith("s") else None}, 600, 3000)
         self.assertEqual([i["id"] for i in state.resume()], ["s:1:2", "tt9"])
 
+    def test_recent_shows_series_once_with_movies_newest_first(self):
+        clock = [0]
+        state = WatchState(tempfile.mkdtemp(prefix="aios-hist-") + "/s.json", clock=lambda: clock[0])
+        steps = [({"id": "s:1:1", "type": "Episode", "seriesId": "s", "seriesName": "Show"}, 2900),
+                 ({"id": "tt9", "type": "Movie", "name": "Film"}, 2900),
+                 ({"id": "tt8", "type": "Movie", "name": "Half"}, 600),
+                 ({"id": "s:1:2", "type": "Episode", "seriesId": "s", "seriesName": "Show"}, 600)]
+        for i, (item, position) in enumerate(steps):
+            clock[0] = i
+            state.record(item, position, 3000)
+        clock[0] = 9
+        state.record({"id": "tt7", "type": "Movie"}, 10, 3000)
+        recent = state.recent()
+        self.assertEqual([(i["id"], i["type"]) for i in recent], [("s", "Series"), ("tt8", "Movie"), ("tt9", "Movie")])
+        self.assertEqual(recent[0]["name"], "Show")
+
     def test_persisted_and_favorites(self):
         path = tempfile.mkdtemp(prefix="aios-hist-") + "/s.json"
         state = WatchState(path)
