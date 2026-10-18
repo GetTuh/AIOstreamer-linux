@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=AIOstreamer
+GenericName=Media Center
+Comment=TV-first AIOStreams client with mpv playback
+Exec=@EXEC@ %U
+Icon=aiostreamer
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=aiostreams;stremio;debrid;media;movies;tv;mpv;
+StartupNotify=true
+StartupWMClass=aiostreamer
+SingleMainWindow=true

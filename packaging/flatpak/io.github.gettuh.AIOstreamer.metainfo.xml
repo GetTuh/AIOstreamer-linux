@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.gettuh.AIOstreamer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>AIOstreamer</name>
+  <summary>Fast 10-foot AIOStreams client with mpv playback</summary>
+  <description>
+    <p>A TV-first client for your AIOStreams configuration, driven entirely by a remote, gamepad or keyboard.
+    Playback is handed to a fullscreen mpv so HDR output is preserved.</p>
+    <ul>
+      <li>Continue Watching, Next Up, My List and a row for every AIOStreams catalog</li>
+      <li>Shows with seasons and Specials, search, catalog browsing with genres</li>
+      <li>Versions in your AIOStreams sort order with resolution, HDR, audio, size and debrid cache status</li>
+      <li>Resume, Up Next and version switching inside mpv</li>
+      <li>Subtitles from your subtitle addons, audio passthrough, skip intro by chapters</li>
+      <li>Several AIOStreams configurations, cached catalogs and metadata</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.gettuh.AIOstreamer.desktop</launchable>
+  <url type="homepage">https://github.com/GetTuh/AIOstreamer-linux</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/home.jpg</image>
+      <caption>Home</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/details.jpg</image>
+      <caption>Movie details</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/show.jpg</image>
+      <caption>Show with seasons</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/versions.jpg</image>
+      <caption>Version picker</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/upnext.jpg</image>
+      <caption>Up Next inside mpv</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/browse.jpg</image>
+      <caption>Browse a catalog</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/GetTuh/AIOstreamer-linux/master/packaging/screenshots/search.jpg</image>
+      <caption>Search</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>keyboard</control>
+    <control>tv-remote</control>
+    <control>gamepad</control>
+  </supports>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

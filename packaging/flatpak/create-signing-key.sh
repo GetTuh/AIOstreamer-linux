@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${1:-GetTuh/jellyfin-tv-linux}"
+REPO="${1:-GetTuh/AIOstreamer-linux}"
 OUT="${2:-$HOME/.local/share/jellyfin-tv-signing}"
 mkdir -p "$OUT"
 chmod 700 "$OUT"
@@ -9,7 +9,7 @@ export GNUPGHOME="$OUT/gnupg"
 mkdir -p "$GNUPGHOME"
 chmod 700 "$GNUPGHOME"
 
-gpg --batch --passphrase '' --quick-gen-key "Jellyfin TV Flatpak <noreply@github.com>" ed25519 sign never
+gpg --batch --passphrase '' --quick-gen-key "AIOstreamer Flatpak <noreply@github.com>" ed25519 sign never
 KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/ {print $5; exit}')"
 gpg --armor --export-secret-keys "$KEY_ID" > "$OUT/private.asc"
 gpg --armor --export "$KEY_ID" > "$OUT/public.asc"

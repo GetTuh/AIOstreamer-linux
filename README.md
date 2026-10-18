@@ -1,4 +1,4 @@
-# Jellyfin TV for Linux
+# AIOstreamer for Linux
 
 A fast, native 10-foot client for [AIOStreams](https://github.com/Viren070/AIOStreams) on Linux TVs and HTPCs. Built with Qt Quick (QML on the GPU scene graph, no web view), driven entirely by a remote, gamepad or keyboard, and it hands playback to a fullscreen mpv so HDR and Dolby Vision output stays intact. On KDE it picks up your accent color through Kirigami.
 
@@ -56,12 +56,12 @@ Flatpak:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak remote-add --user --if-not-exists jellyfin-tv https://gettuh.github.io/jellyfin-tv-linux/jellyfin-tv.flatpakrepo
-flatpak install --user jellyfin-tv io.github.gettuh.JellyfinTV
+flatpak remote-add --user --if-not-exists aiostreamer https://gettuh.github.io/AIOstreamer-linux/aiostreamer.flatpakrepo
+flatpak install --user aiostreamer io.github.gettuh.AIOstreamer
 ```
 
-From source: `packaging/install.sh`, then run `jellyfin-tv`. Details, keys and release steps are in [jellyfin_tv/README.md](jellyfin_tv/README.md).
+From source: `packaging/install.sh`, then run `aiostreamer`. Details, keys and release steps are in [aiostreamer/README.md](aiostreamer/README.md).
 
 ## License
 
-Jellyfin TV is free software under the [GNU GPL v3 or later](LICENSE). The bundled [uosc](https://github.com/tomasklaen/uosc) in `jellyfin_tv/player/uosc/` keeps its own LGPL license.
+AIOstreamer is free software under the [GNU GPL v3 or later](LICENSE). The bundled [uosc](https://github.com/tomasklaen/uosc) in `aiostreamer/player/uosc/` keeps its own LGPL license.
