@@ -151,6 +151,7 @@ ApplicationWindow {
         id: showComponent
         ShowPage {
             onOpenItem: (entry) => window.openItem(entry)
+            onOpenSources: (model) => stack.push(sourcesComponent, { details: model })
         }
     }
 

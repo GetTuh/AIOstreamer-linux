@@ -86,7 +86,7 @@ FocusScope {
                 y: 18
                 spacing: 12
                 Repeater {
-                    model: [row.modelData.resolution, row.modelData.hdr, row.modelData.codec, row.modelData.audio, row.modelData.size, row.modelData.service, row.modelData.languages].filter(function (p) { return p && p.length > 0 })
+                    model: [row.modelData.resolution, row.modelData.quality, row.modelData.hdr, row.modelData.codec, row.modelData.audio, row.modelData.size, row.modelData.service, row.modelData.languages].filter(function (p) { return p && p.length > 0 })
                     delegate: Rectangle {
                         required property string modelData
                         height: 36

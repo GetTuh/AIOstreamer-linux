@@ -13,6 +13,7 @@ FocusScope {
     property bool episodeTargeted: false
 
     signal openItem(var entry)
+    signal openSources(var model)
 
     property real chrome: trailerControls.open ? 0 : 1
     Behavior on chrome { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
@@ -28,6 +29,10 @@ FocusScope {
         id: details
         itemId: page.itemId
         onUserDataChanged: (changedId) => app.notifyChanged(changedId)
+    }
+
+    DetailsModel {
+        id: nextDetails
     }
 
     SeriesModel {
@@ -201,16 +206,30 @@ FocusScope {
                 primary: true
                 icon: "▶"
                 text: (series.nextUpResumeSeconds > 0 ? "Resume " : "Play ") + series.nextUpLabel + (series.nextUpResumeText ? "  " + series.nextUpResumeText : "")
-                KeyNavigation.right: watchedButton
+                KeyNavigation.right: versionButton
                 KeyNavigation.down: tabs
                 onClicked: app.play(series.nextUpId, series.nextUpResumeSeconds)
+            }
+
+            TvButton {
+                id: versionButton
+                visible: playButton.visible
+                icon: "☰"
+                text: "Version"
+                KeyNavigation.left: playButton
+                KeyNavigation.right: watchedButton
+                KeyNavigation.down: tabs
+                onClicked: {
+                    nextDetails.itemId = series.nextUpId
+                    page.openSources(nextDetails)
+                }
             }
 
             TvButton {
                 id: watchedButton
                 icon: details.played ? "✓" : "○"
                 text: details.played ? "Watched" : "Mark watched"
-                KeyNavigation.left: playButton.visible ? playButton : null
+                KeyNavigation.left: versionButton.visible ? versionButton : null
                 KeyNavigation.right: favoriteButton
                 KeyNavigation.down: tabs
                 onClicked: details.togglePlayed()

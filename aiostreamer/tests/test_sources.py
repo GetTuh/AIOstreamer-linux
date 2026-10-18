@@ -49,6 +49,21 @@ class SourcesTest(unittest.TestCase):
         self.assertEqual(sources.stream_id(bare), "https://x")
         self.assertEqual(sources.resolution({"name": "Something 4K"}), 2160)
 
+    def test_guesses_from_text_without_stream_data(self):
+        remux = {"url": "https://x/playback/token1", "name": "4K ⚡", "description": "☁ The Matrix\n⛉ [DL] Library",
+                 "behaviorHints": {"filename": "The.Matrix.1999.PROPER.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-FGT.mkv",
+                                   "bingeGroup": "com.aiostreams.viren070|2160p|BluRay REMUX|FGT", "videoSize": 65_700_000_000}}
+        self.assertEqual(sources.short_label(remux), "4K · Remux · SDR · HEVC · Atmos TrueHD 7.1 · 65.7 GB · DL ⚡")
+        web = {"url": "https://x/2", "name": "1080p", "description": "[RD] cached",
+               "behaviorHints": {"filename": "Show.S01E01.1080p.WEB-DL.DDP5.1.HDR10+.DV.H.264-GRP.mkv"}}
+        info = sources.describe(web)
+        self.assertEqual((info["quality"], info["hdr"], info["codec"], info["audio"], info["service"]),
+                         ("WEB-DL", "DV HDR10+", "H.264", "DD+ 5.1", "RD"))
+        self.assertEqual(sources.describe({"name": "x", "behaviorHints": {"filename": "a.DVDRip.AC3.mkv"}})["audio"], "DD")
+        again = dict(remux, url="https://x/playback/token2")
+        self.assertEqual(sources.stream_id(remux), sources.stream_id(again))
+        self.assertEqual(sources.find([again], sources.stream_id(remux)), again)
+
     def test_default_is_first_in_aiostreams_order(self):
         streams = [stream("a", "2160p"), stream("b", "1080p")]
         self.assertEqual(sources.pick(streams, {"id": "m"})["url"], "https://x/a")
