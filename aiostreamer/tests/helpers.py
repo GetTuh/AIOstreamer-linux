@@ -57,6 +57,7 @@ class FakeSettings:
             "gamepad": True,
             "autoplay_next": True,
             "upnext_seconds": 10,
+            "keys": "",
         }
         self.values.update(values)
         self.sources = {}

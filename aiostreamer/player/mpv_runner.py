@@ -6,6 +6,7 @@ import shutil
 import threading
 from pathlib import Path
 
+from aiostreamer.keys import write_player_keys
 from aiostreamer.player.mpv_ipc import MpvIpc
 from aiostreamer.player.tracks import preferred
 
@@ -110,7 +111,7 @@ def build_options(settings, title="", start=0.0, extra=None, theme=None):
         options["script-opts"] = uosc_script_opts(theme)
     else:
         options["script-opts"] = "aios-overlay=no"
-    options["script-opts"] += ",aios-skip=%s,aios-accent=%s" % (settings.get("skip_segments") or "ask", _hex(theme["accent"]))
+    options["script-opts"] += ",aios-skip=%s,aios-accent=%s,aios-keys=%s" % (settings.get("skip_segments") or "ask", _hex(theme["accent"]), write_player_keys(settings.get("keys")))
     options["scripts"] = ":".join(scripts)
     if start and start > 1:
         options["start"] = "%.3f" % start

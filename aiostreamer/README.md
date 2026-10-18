@@ -55,7 +55,7 @@ The Flatpak bundles its own mpv (`gpu-next`, Vulkan, VA-API). Inside the sandbox
 
 1. Once: `packaging/flatpak/create-signing-key.sh` creates the repo signing key and stores it as the `FLATPAK_GPG_PRIVATE_KEY` secret (needs `gh`). Keep the backup it writes.
 2. Once: Settings → Pages → Source: GitHub Actions.
-3. `git tag v0.2.0 && git push origin v0.2.0` runs tests, builds the Flatpak, publishes the signed repo to GitHub Pages and attaches a `.flatpak` bundle to a GitHub release.
+3. Bump `__version__` in `aiostreamer/__init__.py`, commit, then `git tag vX.Y.Z && git push origin master vX.Y.Z` runs tests, builds the Flatpak, publishes the signed repo to GitHub Pages and attaches a `.flatpak` bundle to a GitHub release.
 
 Pushes to `master` also build an unsigned test bundle (workflow artifact) without publishing. Python wheel pins live in `packaging/flatpak/python-deps.json`, regenerated with `gen_python_deps.py`.
 
@@ -67,9 +67,11 @@ QT_QPA_PLATFORM=offscreen python -m unittest discover -s aiostreamer/tests -t .
 
 ## Keys
 
-Arrows move, Enter selects, Esc/Back/Backspace goes back. On Home, Back asks to quit.
+Arrows move, Enter selects, Esc/Back/Backspace goes back, T plays the trailer. On Home, Back asks to quit. **F1** or **?** shows every key, in the app and in the player (Playback menu → Keys).
 
-In mpv, Settings → Player controls picks **Overlay** (default) or **Native mpv** (mpv's own OSC and default keys; Esc/Back still returns to the app). Overlay (uosc interface, themed with the app's accent): Left/Right seek 10 s, OK pauses, Up opens the playback menu (audio, subtitles, version, chapters, stop; switching version keeps your position), Down shows the timeline, Esc/Back stops playback. Keys can be overridden in your mpv `input.conf`; if you already use uosc from `~/.config/mpv/scripts`, yours is used.
+Settings → Keys and remote buttons rebinds them: OK on an action, then press the key or remote button to add (a key already used by another action moves). Right then OK resets one action; Reset all keys restores the defaults. Text fields keep letters and editing keys for typing.
+
+In mpv, Settings → Player controls picks **Overlay** (default) or **Native mpv** (mpv's own OSC and default keys; Esc/Back still returns to the app, and keys you changed still apply). Overlay (uosc interface, themed with the app's accent): Left/Right seek 10 s, OK pauses, Up opens the playback menu (audio, subtitles, version, chapters, keys, stop; switching version keeps your position), Down shows the timeline, Esc/Back stops playback; F, M, 9/0, J and # keep mpv's meaning. Other mpv default keys keep working, and your mpv `input.conf` can still override them; if you already use uosc from `~/.config/mpv/scripts`, yours is used.
 
 ## mpv
 

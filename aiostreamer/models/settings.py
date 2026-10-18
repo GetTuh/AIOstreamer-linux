@@ -43,6 +43,7 @@ class Settings(QObject):
         "skip_segments": "ask",
         "trailer_previews": "muted",
         "gamepad": True,
+        "keys": "",
     }
 
     def __init__(self):
