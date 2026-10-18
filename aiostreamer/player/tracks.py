@@ -31,6 +31,20 @@ LANGUAGE_ALIASES = {
     "te": "tel", "telugu": "tel",
     "und": "",
 }
+COUNTRY_LANGUAGES = {
+    "united states": "eng", "usa": "eng", "united kingdom": "eng", "uk": "eng", "canada": "eng", "australia": "eng",
+    "ireland": "eng", "new zealand": "eng", "south africa": "eng",
+    "japan": "jpn", "south korea": "kor", "korea": "kor", "korea, republic of": "kor", "north korea": "kor",
+    "china": "chi", "hong kong": "chi", "taiwan": "chi",
+    "france": "fre", "germany": "ger", "west germany": "ger", "east germany": "ger", "austria": "ger",
+    "spain": "spa", "mexico": "spa", "argentina": "spa", "colombia": "spa", "chile": "spa", "peru": "spa",
+    "italy": "ita", "brazil": "por", "portugal": "por", "netherlands": "dut", "poland": "pol", "sweden": "swe",
+    "norway": "nor", "denmark": "dan", "finland": "fin", "russia": "rus", "soviet union": "rus", "ukraine": "ukr",
+    "turkey": "tur", "türkiye": "tur", "india": "hin", "thailand": "tha", "indonesia": "ind", "vietnam": "vie",
+    "czech republic": "cze", "czechia": "cze", "hungary": "hun", "greece": "gre", "israel": "heb", "romania": "rum",
+    "egypt": "ara", "saudi arabia": "ara", "iran": "per",
+}
+ORIGINAL_WORDS = ("original", " vo ", "[vo]", "(vo)")
 FORCED_WORDS = ("forced", "signs", "songs")
 SDH_WORDS = ("sdh", "cc", "hearing")
 
@@ -40,10 +54,19 @@ def canonical(lang):
     return LANGUAGE_ALIASES.get(lang, lang)
 
 
-def preferred(setting):
+def country_language(country):
+    first = (country or "").split(",")[0].strip().lower()
+    return COUNTRY_LANGUAGES.get(first, "")
+
+
+def wants_original(setting):
+    return any(part.strip().lower() == "original" for part in (setting or "").split(","))
+
+
+def preferred(setting, original=""):
     langs = []
     for part in (setting or "").split(","):
-        lang = canonical(part)
+        lang = canonical(original) if part.strip().lower() == "original" else canonical(part)
         if lang and lang not in langs and lang != "original":
             langs.append(lang)
     return langs
@@ -94,9 +117,15 @@ def choose_subtitle(tracks, sub_langs, mode, audio_lang):
     return sorted(matching, key=rank)[0]["id"]
 
 
-def choose_audio(tracks, audio_langs):
+def choose_audio(tracks, audio_langs, original_hint=False):
     audio = [t for t in tracks if t.get("type") == "audio"]
-    if not audio or not audio_langs:
+    if not audio:
+        return None
+    if original_hint:
+        marked = [t for t in audio if any(w in " %s " % _title(t) for w in ORIGINAL_WORDS)]
+        if len(marked) == 1:
+            return marked[0]["id"]
+    if not audio_langs:
         return None
     matching = [t for t in audio if _lang(t) in audio_langs]
     if not matching:

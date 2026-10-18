@@ -198,6 +198,30 @@ class FallbackTest(unittest.TestCase):
         lib.series(SHOW["id"])
 
 
+class CountryTest(unittest.TestCase):
+    def test_country_from_meta_series_or_cinemeta_search(self):
+        class Cinemeta(FakeClient):
+            searches = []
+
+            def meta(self, kind, item_id, fresh=False):
+                return {"id": item_id, "type": kind, "name": "x", "country": {"tt1": "Japan", "tt2": "France"}.get(item_id, "")}
+
+            def catalog(self, kind, catalog_id, extra=None):
+                self.searches.append((kind, extra["search"]))
+                return [{"id": "tt9", "releaseInfo": "1999"}, {"id": "tt1", "releaseInfo": "2007-2017"}]
+
+        cinemeta = Cinemeta()
+        lib = Library(FakeSession(FakeClient(LIBRARY_ONLY)), lambda cache: cinemeta)
+        self.assertEqual(lib.country({"id": "tt5", "country": "Italy"}), "Italy")
+        self.assertEqual(lib.country({"id": "tt2", "type": "Movie"}), "France")
+        self.assertEqual(lib.country({"id": "tt1:1:1", "type": "Episode", "seriesId": "tt1"}), "Japan")
+        episode = {"id": "aiostreams::library.n:0", "type": "Episode", "seriesId": "aiostreams::library.n",
+                   "seriesName": "Naruto Shippūden (2007)", "stremioType": "library"}
+        self.assertEqual(lib.country(episode), "Japan")
+        self.assertEqual(cinemeta.searches, [("series", "Naruto Shippūden")])
+        self.assertEqual(m.from_video(m.from_meta({"id": "tt1", "type": "series", "country": "Japan"}), {"id": "tt1:1:1"})["country"], "Japan")
+
+
 class DefaultVideoTest(unittest.TestCase):
     def test_library_movie_plays_default_video(self):
         meta = {"id": "aiostreams::library.m", "type": "library", "name": "Movie",

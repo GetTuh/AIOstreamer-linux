@@ -8,6 +8,7 @@ from aiostreamer.api.aio import CINEMETA_URL, AioClient, AioError, supports
 log = logging.getLogger("aiostreamer.library")
 
 TT_EPISODE_RE = re.compile(r"^(tt\d+):(\d+):(\d+)$")
+NAME_YEAR_RE = re.compile(r"^(.*?)\s*\((\d{4})\)\s*$")
 NEXT_UP_SHOWS = 16
 CATALOG_PAGES = 6
 FALLBACK_TYPES = ("movie", "series")
@@ -290,6 +291,25 @@ class Library:
             found = []
         found += [s for s in (stream or {}).get("subtitles") or [] if s.get("url")]
         return found
+
+    def country(self, item):
+        if item.get("country"):
+            return item["country"]
+        series_id = item.get("seriesId")
+        target = series_id or item.get("id", "")
+        if target.startswith("tt"):
+            meta = self._meta("series" if series_id else stremio_kind(item), target)
+            return str(meta.get("country") or "")
+        match = NAME_YEAR_RE.match(item.get("seriesName") or item.get("name") or "")
+        title, year = (match.group(1), match.group(2)) if match else (item.get("seriesName") or item.get("name") or "", "")
+        if not title:
+            return ""
+        kind = "series" if series_id or item.get("type") == "Series" else "movie"
+        found = self.fallback.catalog(kind, "top", {"search": title})
+        hit = next((f for f in found if year and str(f.get("releaseInfo") or "").startswith(year)), None) or (found[0] if found else None)
+        if not hit or not str(hit.get("id", "")).startswith("tt"):
+            return ""
+        return str(self.fallback.meta(kind, hit["id"]).get("country") or "")
 
     def trailers(self, item_id):
         item = self.peek_item(item_id) or self.item(item_id)

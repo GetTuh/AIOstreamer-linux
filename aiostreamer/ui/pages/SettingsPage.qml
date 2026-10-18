@@ -9,6 +9,9 @@ FocusScope {
 
     signal addAccount()
 
+    readonly property var audioLanguages: [languages[0],
+        { value: "original", text: "Original" },
+        { value: "original,eng,en", text: "Original, else English" }].concat(languages.slice(1))
     readonly property var languages: [
         { value: "", text: "Auto" },
         { value: "eng,en", text: "English" },
@@ -79,8 +82,8 @@ FocusScope {
             SettingRow {
                 id: first
                 label: "Audio language"
-                hint: "Picks this audio track when a version has several"
-                options: page.languages
+                hint: "Picks this audio track when a version has several. Original follows the title's country"
+                options: page.audioLanguages
                 value: app.settings.audioLanguage
                 onPicked: (v) => app.settings.audioLanguage = v
                 KeyNavigation.down: subLang

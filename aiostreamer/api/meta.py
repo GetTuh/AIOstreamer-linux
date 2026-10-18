@@ -123,6 +123,8 @@ def from_meta(meta):
         "released": meta.get("released") or "",
         "trailers": trailer_ids(meta),
     }
+    if meta.get("country"):
+        item["country"] = str(meta["country"])
     if video and video != item["id"]:
         item["videoId"] = video
     return item
@@ -159,6 +161,7 @@ def from_video(series, video):
         "rating": series.get("rating", ""),
         "genres": series.get("genres", []),
         "trailers": [],
+        "country": series.get("country", ""),
     }
 
 

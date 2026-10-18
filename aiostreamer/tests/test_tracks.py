@@ -1,6 +1,6 @@
 import unittest
 
-from aiostreamer.player.tracks import canonical, choose_audio, choose_subtitle, preferred
+from aiostreamer.player.tracks import canonical, choose_audio, choose_subtitle, country_language, preferred, wants_original
 
 TRACKS = [
     {"type": "audio", "id": 1, "lang": "fre", "default": True},
@@ -20,8 +20,31 @@ class TracksTest(unittest.TestCase):
         self.assertEqual(preferred("eng,en"), ["eng"])
         self.assertEqual(canonical("und"), "")
 
-    def test_old_original_setting_is_ignored(self):
+    def test_original_without_known_language_is_skipped(self):
         self.assertEqual(preferred("original,eng"), ["eng"])
+        self.assertEqual(preferred("original"), [])
+
+    def test_original_language_from_country(self):
+        self.assertEqual(country_language("Japan"), "jpn")
+        self.assertEqual(country_language("United States, United Kingdom"), "eng")
+        self.assertEqual(country_language("Atlantis"), "")
+        self.assertTrue(wants_original("original,eng,en"))
+        self.assertFalse(wants_original("eng,en"))
+        self.assertEqual(preferred("original,eng,en", "jpn"), ["jpn", "eng"])
+        dubbed = [
+            {"type": "audio", "id": 1, "lang": "fre", "default": True},
+            {"type": "audio", "id": 2, "lang": "jpn"},
+        ]
+        self.assertEqual(choose_audio(dubbed, preferred("original", "jpn")), 2)
+        self.assertEqual(choose_audio(dubbed, preferred("original,eng", "kor")), None)
+
+    def test_original_title_hint_when_language_unknown(self):
+        tracks = [
+            {"type": "audio", "id": 1, "lang": "ita", "default": True, "title": "Italiano"},
+            {"type": "audio", "id": 2, "lang": "eng", "title": "English (Original)"},
+        ]
+        self.assertEqual(choose_audio(tracks, [], original_hint=True), 2)
+        self.assertEqual(choose_audio(tracks, []), None)
 
     def test_audio_language_beats_default_track(self):
         tracks = [

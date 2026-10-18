@@ -30,7 +30,7 @@ class Settings(QObject):
     DEFAULTS = {
         "server": "",
         "username": "",
-        "audio_language": "",
+        "audio_language": "original",
         "subtitle_language": "eng,en",
         "subtitle_mode": "auto",
         "autoplay_next": True,

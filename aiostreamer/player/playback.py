@@ -5,7 +5,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from aiostreamer.api.meta import episode_label
 from aiostreamer.models.sources import binge_group, describe, find, pick, remember, short_label, stream_id
 from aiostreamer.player.mpv_runner import MpvPlayer, build_options
-from aiostreamer.player.tracks import canonical, choose_audio, choose_subtitle, preferred
+from aiostreamer.player.tracks import canonical, choose_audio, choose_subtitle, country_language, preferred, wants_original
 
 log = logging.getLogger("aiostreamer.playback")
 
@@ -393,9 +393,20 @@ class PlaybackController(QObject):
         item, stream = state["item"], state["stream"]
         self._runner.run(lambda: self._setup_tracks(player, item, stream))
 
+    def _original_language(self, item, tracks):
+        if sum(1 for t in tracks if t.get("type") == "audio") < 2:
+            return ""
+        try:
+            return country_language(self._library.country(item))
+        except Exception as exc:
+            log.info("original language: %s", exc)
+            return ""
+
     def _setup_tracks(self, player, item, stream):
         tracks = player.get("track-list", []) or []
-        aid = choose_audio(tracks, preferred(self._settings.get("audio_language")))
+        setting = self._settings.get("audio_language")
+        original = self._original_language(item, tracks) if wants_original(setting) else ""
+        aid = choose_audio(tracks, preferred(setting, original), wants_original(setting) and not original)
         if aid is not None:
             player.command("set_property", "aid", aid)
         audio = next((t for t in tracks if t.get("type") == "audio" and (t.get("id") == aid or (aid is None and t.get("selected")))), None)
