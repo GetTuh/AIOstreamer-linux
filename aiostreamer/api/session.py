@@ -6,7 +6,7 @@ import threading
 
 import keyring
 
-from aiostreamer.api.aio import AioClient, AioError, instance_origin, manifest_uuid, normalize_manifest_url, resolve_manifest
+from aiostreamer.api.aio import AioClient, AioError, instance_origin, manifest_uuid, normalize_manifest_url, resolve_manifest, supports
 from aiostreamer.api.cache import JsonCache
 from aiostreamer.api.history import WatchState
 from aiostreamer.models.settings import cache_dir, config_dir
@@ -39,10 +39,16 @@ def clean_store(data):
     return {"active": data.get("active", ""), "accounts": accounts}
 
 
+def metadata_client(manifest, cache):
+    tag = hashlib.sha1(manifest.encode()).hexdigest()[:8]
+    return AioClient(manifest, cache, label="Metadata addon", prefix="meta-%s:" % tag)
+
+
 class Session:
     def __init__(self, settings, resolver=resolve_manifest, client_factory=None):
         self.settings = settings
         self.client = None
+        self.metadata = None
         self.history = None
         self.account = {}
         self._resolver = resolver
@@ -63,6 +69,34 @@ class Session:
     @property
     def server(self):
         return self.account.get("instance", "")
+
+    @property
+    def metadata_url(self):
+        return self.account.get("metadata", "")
+
+    def set_metadata(self, text):
+        if self.client is None:
+            raise LoginError("Not signed in")
+        text = (text or "").strip()
+        client = None
+        manifest = ""
+        if text:
+            try:
+                manifest = normalize_manifest_url(text)
+                client = metadata_client(manifest, self.client.cache)
+                data = client.manifest(fresh=True)
+            except AioError as exc:
+                raise LoginError(str(exc))
+            if not any(supports(data, "meta", t) for t in data.get("types") or []):
+                raise LoginError("That addon has no metadata")
+        self.metadata = client
+        self.account["metadata"] = manifest
+        store = self._load_store()
+        for account in store["accounts"]:
+            if account.get("key") == self.account.get("key"):
+                account["metadata"] = manifest
+        self._write_store(store)
+        return manifest
 
     def login(self, instance, user, password):
         text = (instance or "").strip()
@@ -85,8 +119,11 @@ class Session:
             raise LoginError(str(exc))
         account = {"key": key, "manifest": manifest, "name": display_name(user, manifest), "instance": instance_origin(manifest),
                    "user": (user or "").strip() or manifest_uuid(manifest)}
-        self._activate(account, client)
         store = self._load_store()
+        previous = next((a for a in store["accounts"] if a.get("key") == key), {})
+        if previous.get("metadata"):
+            account["metadata"] = previous["metadata"]
+        self._activate(account, client)
         store["accounts"] = [a for a in store["accounts"] if a.get("key") != key] + [account]
         store["active"] = key
         self._write_store(store)
@@ -137,6 +174,7 @@ class Session:
     def _activate(self, account, client):
         self.account = dict(account)
         self.client = client
+        self.metadata = metadata_client(account["metadata"], client.cache) if account.get("metadata") else None
         self.history = WatchState(config_dir() / "state" / ("%s.json" % account["key"]))
         threading.Thread(target=client.cache.prune, name="aios-cache-prune", daemon=True).start()
         self.settings.set("server", account.get("instance", ""))
@@ -144,6 +182,7 @@ class Session:
 
     def _teardown(self):
         self.client = None
+        self.metadata = None
         self.history = None
         self.account = {}
 

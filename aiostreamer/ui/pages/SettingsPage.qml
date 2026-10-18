@@ -283,7 +283,7 @@ FocusScope {
                 icon: "⌨"
                 text: "Keys and remote buttons"
                 KeyNavigation.up: gamepadRow
-                KeyNavigation.down: accountList.count > 0 ? accountList.itemAt(0) : addAccountButton
+                KeyNavigation.down: metadataField
                 onClicked: page.openControls()
                 onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
             }
@@ -296,6 +296,40 @@ FocusScope {
                 font.bold: true
             }
 
+            Basic.TextField {
+                id: metadataField
+                width: Math.min(column.width, 1400)
+                text: app.metadataUrl
+                placeholderText: "Metadata addon manifest URL (AIOMetadata), optional"
+                color: Theme.text
+                placeholderTextColor: Theme.textDim
+                font.pixelSize: Theme.fontBody
+                padding: 20
+                background: Rectangle {
+                    radius: Theme.radius
+                    color: Theme.surface
+                    border.width: metadataField.activeFocus ? 4 : 1
+                    border.color: metadataField.activeFocus ? Theme.focus : Theme.surfaceHigh
+                }
+                KeyNavigation.up: keysButton
+                KeyNavigation.down: accountList.count > 0 ? accountList.itemAt(0) : addAccountButton
+                onAccepted: app.setMetadataAddon(text)
+                onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
+                Keys.onEscapePressed: (event) => {
+                    text = app.metadataUrl
+                    event.accepted = false
+                }
+            }
+
+            Text {
+                width: parent.width
+                text: "Catalogs, details and search come from this addon first; streams and subtitles stay on AIOStreams. "
+                      + "Press Enter to save, clear it to remove."
+                color: Theme.textDim
+                font.pixelSize: Theme.fontSmall
+                wrapMode: Text.WordWrap
+            }
+
             Repeater {
                 id: accountList
                 model: app.accounts
@@ -306,7 +340,7 @@ FocusScope {
                     icon: modelData.active ? "✓" : "●"
                     primary: modelData.active
                     text: modelData.username + "  ·  " + modelData.server.replace(/^https?:\/\//, "")
-                    KeyNavigation.up: index > 0 ? accountList.itemAt(index - 1) : keysButton
+                    KeyNavigation.up: index > 0 ? accountList.itemAt(index - 1) : metadataField
                     KeyNavigation.down: index < accountList.count - 1 ? accountList.itemAt(index + 1) : addAccountButton
                     onClicked: if (!modelData.active) app.switchAccount(modelData.key)
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)
@@ -319,7 +353,7 @@ FocusScope {
                     id: addAccountButton
                     icon: "+"
                     text: "Add account"
-                    KeyNavigation.up: accountList.count > 0 ? accountList.itemAt(accountList.count - 1) : keysButton
+                    KeyNavigation.up: accountList.count > 0 ? accountList.itemAt(accountList.count - 1) : metadataField
                     KeyNavigation.right: clearCache
                     onClicked: page.addAccount()
                     onActiveFocusChanged: if (activeFocus) page.ensureVisible(this)

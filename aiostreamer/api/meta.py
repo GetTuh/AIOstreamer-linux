@@ -2,12 +2,19 @@ import re
 from datetime import datetime, timezone
 
 SERIES_TYPES = ("series", "anime")
-TYPE_LABELS = {"movie": "Movies", "series": "Shows", "anime": "Anime", "tv": "TV", "channel": "Channels"}
+TYPE_LABELS = {"movie": "Movies", "series": "Shows", "anime": "Anime", "tv": "TV", "channel": "Channels",
+               "anime.movie": "Anime Movies", "anime.series": "Anime Series"}
+BASE_TYPES = {"anime.movie": "movie", "anime.series": "series"}
 RUNTIME_RE = re.compile(r"(?:(\d+)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?", re.I)
 YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
+def base_type(stremio_type):
+    return BASE_TYPES.get(stremio_type, stremio_type)
+
+
 def kind_for(stremio_type, videos=None, default_video=""):
+    stremio_type = base_type(stremio_type)
     if stremio_type in SERIES_TYPES:
         return "Series"
     if stremio_type == "movie" or default_video:
@@ -99,7 +106,7 @@ def default_video(meta):
 
 
 def direct_type(stremio_type):
-    return stremio_type in ("movie",) + SERIES_TYPES
+    return base_type(stremio_type) in ("movie",) + SERIES_TYPES
 
 
 def from_meta(meta):
@@ -206,8 +213,8 @@ def episode_label(item):
 def catalog_title(catalog):
     name = (catalog.get("name") or catalog.get("id") or "").strip()
     label = TYPE_LABELS.get(catalog.get("type"), (catalog.get("type") or "").title())
-    lowered = name.lower()
-    if not label or any(word in lowered for word in (label.lower(), "movie", "show", "series", "anime", "tv")):
+    words = set(re.findall(r"[a-z]+", name.lower()))
+    if not label or words & ({"movie", "movies", "show", "shows", "series", "anime", "tv"} | set(label.lower().split())):
         return name
     return "%s %s" % (name, label)
 

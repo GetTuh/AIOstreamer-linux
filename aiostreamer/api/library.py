@@ -10,6 +10,7 @@ log = logging.getLogger("aiostreamer.library")
 
 TT_EPISODE_RE = re.compile(r"^(tt\d+):(\d+):(\d+)$")
 NAME_YEAR_RE = re.compile(r"^(.*?)\s*\((\d{4})\)\s*$")
+ADDON_PREFIX_RE = re.compile(r"^[0-9a-f]{7}\.")
 NEXT_UP_SHOWS = 16
 CATALOG_PAGES = 6
 FALLBACK_TYPES = ("movie", "series")
@@ -44,6 +45,10 @@ def stremio_kind(item):
     return item.get("stremioType") or ("series" if item.get("type") in ("Series", "Episode") else "movie")
 
 
+def plain_catalog_id(catalog_id):
+    return ADDON_PREFIX_RE.sub("", catalog_id or "")
+
+
 def regular(episodes):
     return [e for e in episodes if e.get("season") not in (0, None)] or list(episodes)
 
@@ -68,6 +73,24 @@ class Library:
             current = (client, self._fallback_factory(client.cache))
             self._fallback = current
         return current[1]
+
+    @property
+    def metadata(self):
+        return getattr(self.session, "metadata", None)
+
+    def _source(self, name):
+        if name == "metadata" and self.metadata is not None:
+            return self.metadata
+        return self.fallback if name == "cinemeta" else self.client
+
+    def _metadata_manifest(self, cached):
+        if self.metadata is None:
+            return None
+        try:
+            return self._manifest(self.metadata, cached)
+        except AioError as exc:
+            log.info("metadata manifest: %s", exc)
+            return None
 
     @property
     def history(self):
@@ -107,9 +130,14 @@ class Library:
     def catalogs(self, cached=False):
         own = [dict(c, source="aio") for c in (self._manifest(self.client, cached) or {}).get("catalogs") or []
                if c.get("id") and c.get("type")]
+        extra_meta = [dict(c, source="metadata") for c in (self._metadata_manifest(cached) or {}).get("catalogs") or []
+                      if c.get("id") and c.get("type")]
+        if extra_meta:
+            taken = {(c["type"], c["id"]) for c in extra_meta}
+            own = extra_meta + [c for c in own if (c["type"], plain_catalog_id(c["id"])) not in taken]
         covered = {c["type"] for c in own if m.browsable(c)}
         missing = [t for t in FALLBACK_TYPES if t not in covered]
-        if not missing:
+        if not missing or extra_meta:
             return own
         try:
             extra = (self._manifest(self.fallback, cached) or {}).get("catalogs") or []
@@ -121,10 +149,12 @@ class Library:
     def _catalog_client(self, kind, catalog_id, cached=False):
         for catalog in self.catalogs(cached):
             if catalog["type"] == kind and catalog["id"] == catalog_id:
-                return self.fallback if catalog["source"] == "cinemeta" else self.client
+                return self._source(catalog["source"])
         return self.client
 
     def _meta_client(self, kind, item_id, cached=False):
+        if supports(self._metadata_manifest(cached), "meta", kind, item_id):
+            return self.metadata, kind
         manifest = self._manifest(self.client, cached)
         if manifest is not None and not supports(manifest, "meta", kind, item_id) and str(item_id).startswith("tt"):
             return self.fallback, "movie" if kind == "movie" else "series"
@@ -180,11 +210,14 @@ class Library:
     def search(self, term, kind):
         types = ("movie",) if kind == "Movie" else ("series", "anime")
         found, own = [], []
-        for catalog in self.catalogs():
-            direct = m.direct_type(catalog["type"])
-            if not m.searchable(catalog) or (direct and catalog["type"] not in types):
+        catalogs = [c for c in self.catalogs() if m.searchable(c)]
+        led = {m.base_type(c["type"]) for c in catalogs if c["source"] == "metadata"}
+        for catalog in catalogs:
+            base = m.base_type(catalog["type"])
+            direct = m.direct_type(base)
+            if direct and (base not in types or (catalog["source"] != "metadata" and base in led)):
                 continue
-            client = self.fallback if catalog["source"] == "cinemeta" else self.client
+            client = self._source(catalog["source"])
             try:
                 metas = client.catalog(catalog["type"], catalog["id"], {"search": term})
             except Exception as exc:
@@ -336,9 +369,11 @@ class Library:
             return item["country"]
         series_id = item.get("seriesId")
         target = series_id or item.get("id", "")
-        if target.startswith("tt"):
-            meta = self._meta("series" if series_id else stremio_kind(item), target)
-            return str(meta.get("country") or "")
+        kind = "series" if series_id else stremio_kind(item)
+        if target.startswith("tt") or supports(self._metadata_manifest(True), "meta", kind, target):
+            country = str(self._meta(kind, target).get("country") or "")
+            if country or target.startswith("tt"):
+                return country
         title, year = split_year(item.get("seriesName") or item.get("name") or "")
         if not title:
             return ""

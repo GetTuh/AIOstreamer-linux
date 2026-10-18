@@ -3,6 +3,7 @@ import unittest
 
 from aiostreamer.api import meta as m
 from aiostreamer.api.history import WatchState
+from aiostreamer.api.aio import AioError
 from aiostreamer.api.library import Library
 
 SHOW = {
@@ -61,6 +62,8 @@ class MetaTest(unittest.TestCase):
         self.assertEqual(m.catalog_title({"type": "movie", "name": "Popular"}), "Popular Movies")
         self.assertEqual(m.catalog_title({"type": "series", "name": "Trending Shows"}), "Trending Shows")
         self.assertEqual(m.catalog_title({"type": "anime", "name": "Airing"}), "Airing Anime")
+        self.assertEqual(m.catalog_title({"type": "series", "name": "TVDB Trending"}), "TVDB Trending Shows")
+        self.assertEqual(m.catalog_title({"type": "anime", "name": "MAL Top Anime"}), "MAL Top Anime")
         year = {"type": "movie", "id": "year", "extra": [{"name": "genre", "isRequired": True, "options": ["2026", "2025"]}]}
         self.assertTrue(m.browsable(year))
         self.assertEqual(m.home_extra(year), {"genre": "2026"})
@@ -184,6 +187,84 @@ LIBRARY_ONLY = {
     ],
     "catalogs": [{"type": "library", "id": "lib", "name": "Library", "extra": [{"name": "search"}, {"name": "skip"}]}],
 }
+
+
+AIO_TMDB = {
+    "types": ["movie", "series", "library"],
+    "resources": [
+        {"name": "catalog", "types": ["library", "movie", "series"]},
+        {"name": "meta", "types": ["library", "movie", "series"], "idPrefixes": ["aiostreams::library", "tmdb:"]},
+    ],
+    "catalogs": [
+        {"type": "library", "id": "ae72eb9.lib", "name": "Library", "extra": [{"name": "search"}]},
+        {"type": "movie", "id": "925e3b0.tmdb.top", "name": "Populaire", "extra": [{"name": "skip"}]},
+        {"type": "movie", "id": "925e3b0.tmdb.language", "name": "Langue", "extra": [{"name": "genre", "options": ["fr"]}]},
+        {"type": "movie", "id": "925e3b0.tmdb.search", "name": "Search", "extra": [{"name": "search", "isRequired": True}]},
+    ],
+}
+
+AIOMETADATA = {
+    "types": ["movie", "series", "anime.movie", "anime.series", "anime"],
+    "idPrefixes": ["tmdb:", "tt", "mal:", "kitsu:"],
+    "resources": ["catalog", "meta"],
+    "catalogs": [
+        {"type": "movie", "id": "tmdb.top", "name": "TMDB Popular", "extra": [{"name": "skip"}]},
+        {"type": "anime", "id": "mal.top_anime", "name": "MAL Top Anime", "extra": [{"name": "skip"}]},
+        {"type": "movie", "id": "search.movie", "name": "Movies Search", "extra": [{"name": "search", "isRequired": True}]},
+        {"type": "anime.series", "id": "search.anime_series", "name": "Anime Series Search", "extra": [{"name": "search", "isRequired": True}]},
+    ],
+}
+
+
+class Recording(FakeClient):
+    def __init__(self, manifest):
+        super().__init__(manifest)
+        self.searched = []
+
+    def catalog(self, kind, catalog_id, extra=None):
+        if extra and "search" in extra:
+            self.searched.append(catalog_id)
+            return [{"id": "%s:%s" % (catalog_id, extra["search"]), "type": "movie" if "movie" in kind else "series", "name": extra["search"]}]
+        return super().catalog(kind, catalog_id, extra)
+
+
+class MetadataAddonTest(unittest.TestCase):
+    def setUp(self):
+        self.own = Recording(AIO_TMDB)
+        self.meta = Recording(AIOMETADATA)
+        session = FakeSession(self.own)
+        session.metadata = self.meta
+        self.lib = Library(session, lambda cache: self.fail("cinemeta used"))
+
+    def test_catalogs_lead_and_replace_duplicates(self):
+        rows = [(c["type"], c["id"]) for c in self.lib.home_catalogs()]
+        self.assertEqual(rows, [("movie", "tmdb.top"), ("anime", "mal.top_anime"), ("library", "ae72eb9.lib"),
+                                ("movie", "925e3b0.tmdb.language")])
+        self.lib.catalog("movie", "tmdb.top", None, 0, 10)
+        self.assertEqual(self.lib._catalog_client("movie", "tmdb.top"), self.meta)
+        self.assertEqual(m.catalog_title({"type": "anime.series", "name": "Search"}), "Search Anime Series")
+
+    def test_meta_from_addon_when_supported(self):
+        self.lib.item("tmdb:1", "Movie")
+        self.lib.item("kitsu:12", "Series")
+        self.assertEqual((self.meta.meta_calls, self.own.meta_calls), (2, 0))
+        self.lib.item("aiostreams::library.x", "Movie")
+        self.assertEqual(self.own.meta_calls, 1)
+
+    def test_search_prefers_addon(self):
+        movies = self.lib.search("dune", "Movie")
+        self.assertEqual([i["id"] for i in movies], ["search.movie:dune"])
+        self.assertEqual(self.own.searched, ["ae72eb9.lib"])
+        shows = self.lib.search("naruto", "Series")
+        self.assertEqual(shows[0]["id"], "search.anime_series:naruto")
+        self.assertEqual(m.kind_for("anime.series"), "Series")
+        self.assertEqual(m.kind_for("anime.movie"), "Movie")
+
+    def test_without_addon_manifest_falls_back_to_aio(self):
+        self.meta._manifest = None
+        self.meta.manifest = lambda: (_ for _ in ()).throw(AioError("down"))
+        self.lib.item("tmdb:1", "Movie")
+        self.assertEqual(self.own.meta_calls, 1)
 
 
 class FallbackTest(unittest.TestCase):

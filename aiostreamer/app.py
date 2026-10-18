@@ -150,6 +150,28 @@ class AppController(QObject):
     def serverUrl(self):
         return self.session.server or self._settings.get("server")
 
+    @Property(str, notify=sessionChanged)
+    def metadataUrl(self):
+        return self.session.metadata_url
+
+    @Slot(str)
+    def setMetadataAddon(self, text):
+        if self._busy or not self.session.logged_in or (text or "").strip() == self.session.metadata_url:
+            return
+        self._set_busy(True)
+        self.runner.run(lambda: self.session.set_metadata(text), self._metadata_set, self._metadata_failed)
+
+    def _metadata_set(self, manifest):
+        self._set_busy(False)
+        self._start_home()
+        self.sessionChanged.emit()
+        self.message.emit("Metadata addon saved" if manifest else "Metadata addon removed")
+
+    def _metadata_failed(self, exc):
+        self._set_busy(False)
+        self.sessionChanged.emit()
+        self.message.emit(str(exc) if isinstance(exc, LoginError) else "Could not load metadata addon: %s" % exc)
+
     @Property(bool, notify=busyChanged)
     def busy(self):
         return self._busy

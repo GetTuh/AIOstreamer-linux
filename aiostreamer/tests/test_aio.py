@@ -313,6 +313,30 @@ class SessionTest(unittest.TestCase):
         restored = Session(self.settings, client_factory=factory)
         self.assertTrue(restored.restore())
 
+    def test_metadata_addon_saved_per_account(self):
+        meta_manifest = {"resources": ["catalog", "meta"], "types": ["movie", "series"], "catalogs": []}
+        self.http.routes = {"meta.example": meta_manifest, "streamsonly.example": {"resources": ["stream"], "types": ["movie"]},
+                            **self.http.routes}
+        real = session_module.metadata_client
+        patcher = mock.patch.object(session_module, "metadata_client",
+                                    lambda manifest, cache: AioClient(manifest, cache, http=self.http, prefix=real(manifest, cache).prefix))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.session.login(MANIFEST, "", "")
+        with self.assertRaises(LoginError):
+            self.session.set_metadata("https://streamsonly.example/x/manifest.json")
+        self.assertIsNone(self.session.metadata)
+        self.assertEqual(self.session.set_metadata("https://meta.example/abc/manifest.json"), "https://meta.example/abc/manifest.json")
+        self.assertTrue(self.session.metadata.prefix.startswith("meta-"))
+        self.session.login(MANIFEST, "", "")
+        self.assertEqual(self.session.metadata_url, "https://meta.example/abc/manifest.json")
+        restored = Session(self.settings, client_factory=self.session._client_factory)
+        restored.restore()
+        self.assertEqual(restored.metadata.manifest_url, "https://meta.example/abc/manifest.json")
+        restored.set_metadata("")
+        self.assertIsNone(restored.metadata)
+        self.assertEqual(json.loads(Session._fallback_path().read_text())["accounts"][0]["metadata"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
