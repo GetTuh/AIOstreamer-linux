@@ -104,6 +104,9 @@ jobs:
           flatpak-builder build "$MANIFEST" \
             --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
             --default-branch=stable --repo=repo $GPG_ARGS
+      - name: Smoke test
+        run: |
+          flatpak-builder --run build "$MANIFEST" sh -c 'PYTHONPATH=/app/share/aiostreamer QT_QPA_PLATFORM=offscreen python3 -c "import aiostreamer.app, aiostreamer.__main__"'
       - name: Repository metadata
         run: |
           flatpak build-update-repo repo --title="AIOstreamer" --default-branch=stable $GPG_ARGS

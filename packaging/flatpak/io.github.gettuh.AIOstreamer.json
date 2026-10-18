@@ -226,6 +226,7 @@
       "name": "aiostreamer",
       "buildsystem": "simple",
       "build-commands": [
+        "mkdir -p /app/share/aiostreamer",
         "cp -r aiostreamer /app/share/aiostreamer/",
         "rm -rf /app/share/aiostreamer/aiostreamer/tests",
         "install -Dm755 packaging/flatpak/aiostreamer.sh /app/bin/aiostreamer",
