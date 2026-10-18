@@ -249,6 +249,9 @@ class Library:
     def favorites(self):
         return self._note(self.history.favorites()) if self.history else []
 
+    def recent(self, limit=24):
+        return self._note(self.history.recent(limit)) if self.history else []
+
     def _after_last(self, series_id, episodes):
         history = self.history
         ordered = regular(episodes)
